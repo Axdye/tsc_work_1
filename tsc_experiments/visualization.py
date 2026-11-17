@@ -283,6 +283,43 @@ def report(root, output):
         fig.savefig(output / "learning-curves.png", dpi=180)
         fig.savefig(output / "learning-curves.pdf")
         plt.close(fig)
+        signal_fields = [
+            "traffic_signal_group_fraction",
+            "mean_unique_phases",
+            "invalid_response_fraction",
+            "truncated_fraction",
+        ]
+        if any(
+            any(field in row for field in signal_fields)
+            for _, rows in logs
+            for row in rows
+        ):
+            fig, axes = plt.subplots(2, 2, figsize=(12, 7))
+            for ax, field in zip(axes.flat, signal_fields):
+                for path, rows in logs:
+                    series = [r for r in rows if field in r]
+                    if series:
+                        ax.plot(
+                            [r["sim_seconds"] for r in series],
+                            [r[field] for r in series],
+                            label=path.parent.name,
+                        )
+                ax.set(
+                    xlabel="Training simulation seconds (including forks)", ylabel=field
+                )
+            handles, labels = axes.flat[0].get_legend_handles_labels()
+            if handles:
+                fig.legend(
+                    handles,
+                    labels,
+                    loc="lower center",
+                    ncol=min(4, len(labels)),
+                    fontsize=7,
+                )
+            fig.tight_layout(rect=(0, 0.08, 1, 1))
+            fig.savefig(output / "training-signal.png", dpi=180)
+            fig.savefig(output / "training-signal.pdf")
+            plt.close(fig)
         budget_rows = []
         for path, rows in logs:
             if not rows:

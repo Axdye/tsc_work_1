@@ -1,6 +1,6 @@
 # 配对反事实 GRPO：实验代码与运行手册
 
-更新：2026-11-17。研究脉络、任务定义及下一部分快慢思考见 [CREDIT_RESEARCH_STORY.md](CREDIT_RESEARCH_STORY.md)。
+更新：2026-11-18。研究脉络、任务定义及下一部分快慢思考见 [CREDIT_RESEARCH_STORY.md](CREDIT_RESEARCH_STORY.md)，当前代码覆盖与待验事项见 [FIRST_WORK_READINESS.md](FIRST_WORK_READINESS.md)。
 
 ## 0. 交付范围与验证边界
 
@@ -84,6 +84,31 @@ export TSC_MODEL=/path/to/Qwen3.5-0.8B
 
 首次模型加载可能由 Hugging Face 下载；本地离线运行可设置 `HF_HUB_OFFLINE=1`。保留模型快照和 manifest 中的 base_commit。依赖是目标约束而非已运行的 GPU lockfile，成功后建议另存 `pip freeze`。
 
+### 开发机无法联网时
+
+上面的 bootstrap、pip 下载和模型下载在**联网准备机**完成。向开发机手动上传仓库、完整模型目录、`vendor/CityFlow`、`vendor/LLMTSCS`、`vendor/CoLLMLight`、`vendor/pybind11-v2.10.4`、`vendor/rapidjson`，以及目标平台的 wheelhouse。保留 `sources.lock.json`。
+
+wheelhouse 必须匹配开发机的 Linux 架构、Python 版本和 CUDA PyTorch；不要用 macOS 默认下载的 wheel 直接给 Linux 安装。具体 Torch wheel 仍须按开发机驱动选择；当前没有这些平台信息，仓库不假定一个通用 CUDA 安装包。
+
+```bash
+# 目标平台匹配的联网准备机，先确定适合服务器的 torch 来源/版本。
+python -m pip download --only-binary=:all: \
+  -r requirements-experiments.txt -d wheelhouse
+
+# 离线开发机，同一个目标 Python 环境。
+python -m pip install --no-index --find-links=wheelhouse -r requirements-experiments.txt
+python -m pip check
+python scripts/build_cityflow.py
+export PYTHONPATH="$PWD/.build/python:$PYTHONPATH"
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export TSC_MODEL=/data/models/Qwen3.5-0.8B
+```
+
+构建仍需要本地 CMake、C++ 编译器和 Python 开发头文件。构建脚本会检查源码/依赖并关闭 Git 子模块下载，缺文件时直接报错。模型需要包括 config、tokenizer/chat template 和完整权重，不能只有权重文件。
+
+单个 train/evaluate/diagnose 命令加 `--set local_files_only=true --set model="$TSC_MODEL"`，可显式限制模型与 adapter 只从本地文件/缓存加载。运行 suite 时，将所用 base config 的 `local_files_only` 设为 `true`，并通过 `--model "$TSC_MODEL"` 指定本地路径。配置默认保留 `false`，兼容联网准备机；离线环境变量仍会生效。
+
 ### 8 张 A100 如何使用
 
 **每个训练任务单卡**，一个 0.8B LoRA 任务不必用 8 卡 DDP。套件在 8 张卡上并行不同方法/seed；单卡足够容纳预期模型规模，但峰值显存仍取决于长度、批量和 Qwen3.5 内核。
@@ -132,6 +157,8 @@ CUDA_VISIBLE_DEVICES=0 python scripts/tsc_experiment.py train \
 ```
 
 检查 `training.jsonl`：loss/gradient_norm 有限；非零优势存在时 `max_lora_delta` 应有变化；观察截断、非法回复和零优势组比例。所有组优势为零且 KL 为零时，不应期待参数更新；先检查状态、生成合法性和动作多样性，不能伪造非零奖励。
+
+新增 `traffic_signal_group_fraction`（合法回复交通分数存在差异的组比例）、`mean_unique_phases`、`invalid_response_fraction` 和 `credit_status`。`format_only` 表示这一窗口非零优势仅来自非法输出惩罚，没有可辨别的合法交通分差；`zero_advantage` 表示所有组优势均为零。`traffic_signal` 只说明存在分差，不说明反事实估计准确或控制效果改善。`groups.jsonl` 保存组级 `valid_traffic_reward_std` 供排查。
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python scripts/tsc_experiment.py evaluate \
@@ -222,6 +249,8 @@ python scripts/tsc_experiment.py report --root outputs/credit-main \
 ```
 
 输出 `runs.csv`、`summary.csv/json`、`RESULTS.md`、每数据集三指标 PNG/PDF、预算学习曲线、训练成本 JSON，存在诊断结果时输出信用质量图。
+
+新日志还会输出 `training-signal.png/pdf`，展示交通对照组比例、相位多样性、非法和截断比例；旧日志缺字段时不会伪造该统计。
 
 报告自动排除 validation 和 scripted，拒绝同数据集下混合路网/流量/时长/换道协议，拒绝同方法、训练 seed、评测 seed 的重复记录。不要把一个方法多个 checkpoint 混进同一汇总目录。
 

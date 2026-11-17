@@ -59,6 +59,23 @@ class ReportingTests(unittest.TestCase):
                 (1, 1, 40),
             ]:
                 self.fixture(root, train_seed, seed, att)
+            # Synthetic plotting fixture, never an experiment result.
+            training = root / "training-fixture"
+            training.mkdir()
+            append_json(
+                training / "training.jsonl",
+                {
+                    "sim_seconds": 100,
+                    "wall_seconds": 1,
+                    "training_generated_tokens": 20,
+                    "training_llm_calls": 4,
+                    "zero_adv_group_fraction": 0.5,
+                    "traffic_signal_group_fraction": 0.5,
+                    "mean_unique_phases": 2,
+                    "invalid_response_fraction": 0,
+                    "truncated_fraction": 0,
+                },
+            )
             report(root, out)
             row = read_json(out / "summary.json")[0]
             self.assertEqual(row["independent_units"], 2)
@@ -66,6 +83,7 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(row["ATT_mean"], 25)
             self.assertAlmostEqual(row["ATT_sd"], 2**0.5 * 10)
             self.assertTrue((out / "toy-metrics.pdf").exists())
+            self.assertTrue((out / "training-signal.pdf").exists())
 
     def test_mixed_timing_is_rejected(self):
         from tsc_experiments.visualization import report

@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "strict": false,
+  "errors": [],
+  "warnings": [],
+  "stats": {
+    "file": "/Users/ljw/Documents/ChatGPT/毕设/tsc/figures/paired_cf_grpo/overview.drawio",
+    "pages": 1,
+    "cells": 123,
+    "vertices": 68,
+    "edges": 53,
+    "embedded_raster": false,
+    "external_image_count": 0,
+    "base64_payload_count": 0,
+    "largest_base64_payload_chars": 0,
+    "caption_like_text": false,
+    "duplicate_id_count": 0,
+    "missing_id_count": 0,
+    "empty_vertex_labels": 22,
+    "empty_edge_labels": 53,
+    "placeholder_label_count": 0,
+    "page_width": 2000.0,
+    "page_height": 960.0
+  }
+}

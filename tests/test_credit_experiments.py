@@ -9,9 +9,14 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from tsc_experiments.common import configuration, standardize, returns_to_go
+from tsc_experiments.common import (
+    configuration,
+    standardize,
+    returns_to_go,
+    validate_config,
+)
 from tsc_experiments.policy import Response, ScriptedPolicy, parse_action
-from tsc_experiments.credit import Collector, label_group
+from tsc_experiments.credit import Collector, label_group, group_diagnostic
 
 
 class FakeEnv:
@@ -119,6 +124,64 @@ class CreditTests(unittest.TestCase):
             values = action_values(env, state, 0, ScriptedPolicy(seed), c, 1, True)
             self.assertEqual(values[0] - values[1], 1)
         self.assertEqual(env.time, 0)
+
+    def test_background_generation_has_no_discarded_batch(self):
+        from tsc_experiments.diagnostics import action_values
+
+        # Two nodes, G=4, M=2, H=1: deployment + candidates + used backgrounds.
+        for method, expected in (
+            ("paired", 2 + 4 + 2 * 2),
+            ("unpaired", 2 + 4 + 2 * 4 * 2),
+        ):
+            env, policy = FakeEnv(), ScriptedPolicy(0)
+            c = self.config(
+                method=method,
+                collect_steps=1,
+                targets_per_state=1,
+                horizon=1,
+                contexts=2,
+            )
+            Collector(env, policy, c, 0).collect()
+            self.assertEqual(policy.calls, expected)
+        for paired, expected in ((True, 2 * 2), (False, 2 * 4 * 2)):
+            env, policy = FakeEnv(), ScriptedPolicy(0)
+            action_values(
+                env, env.snapshot(), 0, policy, self.config(horizon=1), 2, paired
+            )
+            self.assertEqual(policy.calls, expected)
+
+    def test_format_signal_is_distinguished_from_traffic_contrast(self):
+        rows = [Response([], [], [1], "", action) for action in (0, 0, None, 0)]
+        label_group(rows, [-10, -10, -10, -10], "g", 100)
+        stats = group_diagnostic(rows, "g", 0)
+        self.assertFalse(stats["zero_advantage"])
+        self.assertFalse(stats["traffic_signal"])
+        self.assertEqual(stats["unique_phases"], 1)
+        rows[-1].action = 1
+        label_group(rows, [-10, -10, -10, -20], "g", 100)
+        self.assertTrue(group_diagnostic(rows, "g", 0)["traffic_signal"])
+
+    def test_unsupported_or_nonfinite_configuration_fails_before_collection(self):
+        for change in (
+            {"method": "joint", "reward_scope": "local"},
+            {"method": "joint", "contexts": 2},
+            {"method": "trajectory", "continuation": "maxpressure"},
+            {"method": "rtg", "reward_scope": "local"},
+            {"invalid_penalty": -1},
+            {"invalid_penalty": float("nan")},
+            {"learning_rate": float("inf")},
+            {"warmup_steps": 1.5},
+            {"group_size": True},
+            {"local_files_only": "true"},
+        ):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                validate_config(self.config(**change))
+        offline = configuration(
+            ROOT / "configs/credit_smoke.json",
+            ["local_files_only=true", "model=/data/models/qwen"],
+        )
+        self.assertTrue(offline["local_files_only"])
+        self.assertEqual(offline["model"], "/data/models/qwen")
 
 
 class OptionalTorchTests(unittest.TestCase):

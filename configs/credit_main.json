@@ -1,5 +1,6 @@
 {
   "model": "Qwen/Qwen3.5-0.8B",
+  "local_files_only": false,
   "method": "paired",
   "seed": 0,
   "train_dataset": "synthetic8000",

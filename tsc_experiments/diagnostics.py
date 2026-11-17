@@ -17,7 +17,8 @@ def action_values(env, snapshot, target, policy, config, contexts, paired):
     try:
         for _ in range(contexts):
             env.restore(snapshot)
-            background, _ = joint_sample(env, policy)
+            if paired:
+                background, _ = joint_sample(env, policy)
             for a in range(4):
                 env.restore(snapshot)
                 if not paired:

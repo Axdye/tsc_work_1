@@ -67,10 +67,17 @@ class LLMPolicy:
             raise RuntimeError("BF16 GPU required")
         self.torch, self.config = torch, config
         self.device = torch.device("cuda:0")
-        self.model, self.tokenizer = load_policy(config["model"], device=self.device)
+        self.model, self.tokenizer = load_policy(
+            config["model"],
+            device=self.device,
+            local_files_only=config.get("local_files_only", False),
+        )
         if adapter:
             self.model = PeftModel.from_pretrained(
-                self.model, adapter, is_trainable=trainable
+                self.model,
+                adapter,
+                is_trainable=trainable,
+                local_files_only=config.get("local_files_only", False),
             )
         elif trainable:
             self.model = get_peft_model(

@@ -260,17 +260,18 @@ def collect(args):
     print(f"Saved {len(rows)} samples to {output / 'train.jsonl'}", flush=True)
 
 
-def load_policy(model_path, adapter_path=None, device=None):
+def load_policy(model_path, adapter_path=None, device=None, local_files_only=False):
     import torch
     from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="left")
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path, padding_side="left", local_files_only=local_files_only)
     if not tokenizer.chat_template:
         raise ValueError("Choose an instruction model with a chat template")
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
-    config = AutoConfig.from_pretrained(model_path)
+    config = AutoConfig.from_pretrained(model_path, local_files_only=local_files_only)
     load_kwargs = {"dtype": torch.bfloat16, "attn_implementation": "sdpa",
-                   "output_loading_info": True}
+                   "output_loading_info": True, "local_files_only": local_files_only}
     if config.model_type in {"qwen3_5", "qwen3_5_text"}:
         from transformers import Qwen3_5ForCausalLM
         # The official checkpoint has model.language_model.* and model.visual.*.
@@ -292,7 +293,8 @@ def load_policy(model_path, adapter_path=None, device=None):
         raise RuntimeError(f"Unexpected non-vision checkpoint weights: {unexpected}")
     if adapter_path:
         from peft import PeftModel
-        model = PeftModel.from_pretrained(model, adapter_path, is_trainable=False)
+        model = PeftModel.from_pretrained(
+            model, adapter_path, is_trainable=False, local_files_only=local_files_only)
     if device is not None:
         model.to(device)
     return model, tokenizer

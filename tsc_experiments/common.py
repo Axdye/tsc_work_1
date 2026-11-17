@@ -91,8 +91,33 @@ def validate_config(c):
         "lora_rank",
     )
     for key in positive:
-        if not isinstance(c[key], int) or c[key] < 1:
+        if type(c[key]) is not int or c[key] < 1:
             raise ValueError(f"{key} must be a positive integer")
+    for key in (
+        "seed",
+        "validation_seed",
+        "warmup_steps",
+        "max_sim_seconds",
+        "clearance",
+    ):
+        if type(c[key]) is not int or c[key] < 0:
+            raise ValueError(f"{key} must be a nonnegative integer")
+    for key in (
+        "gamma",
+        "clip_epsilon",
+        "learning_rate",
+        "kl_beta",
+        "max_grad_norm",
+        "invalid_penalty",
+        "temperature",
+    ):
+        value = c[key]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
+            raise ValueError(f"{key} must be finite")
     if c["group_size"] < 2 or c["method"] not in METHODS:
         raise ValueError("Unknown method or group_size < 2")
     if not 0 <= c["clearance"] < c["action_interval"]:
@@ -106,6 +131,19 @@ def validate_config(c):
         "maxpressure",
     ):
         raise ValueError("Invalid scope/continuation")
+    if c["method"] in ("joint", "trajectory", "rtg"):
+        if c["reward_scope"] != "global" or c["contexts"] != 1:
+            raise ValueError(
+                "local reward/multiple contexts are supported only by paired/unpaired"
+            )
+    if c["method"] in ("trajectory", "rtg") and c["continuation"] != "llm":
+        raise ValueError(
+            "trajectory/rtg always collect LLM trajectories; rule continuation is unsupported"
+        )
+    if c["invalid_penalty"] < 0:
+        raise ValueError("invalid_penalty must be nonnegative")
+    if type(c.get("local_files_only", False)) is not bool:
+        raise ValueError("local_files_only must be a boolean")
     if c["max_sim_seconds"] < 0 or c["warmup_steps"] < 0:
         raise ValueError("Invalid budget/warmup")
     if c["warmup_steps"] * c["action_interval"] >= c["episode_seconds"]:
@@ -121,6 +159,7 @@ def validate_config(c):
 
 def configuration(path, overrides=()):
     c = read_json(path)
+    c.setdefault("local_files_only", False)
     for item in overrides:
         key, raw = item.split("=", 1)
         if key not in c:

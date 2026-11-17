@@ -261,9 +261,27 @@ def train(config, output, scripted=False):
             "training_generated_tokens": policy.generated_tokens - tokens0,
             "zero_adv_group_fraction": sum(g["zero_advantage"] for g in diagnostics)
             / len(diagnostics),
+            "traffic_signal_group_fraction": sum(
+                g["traffic_signal"] for g in diagnostics
+            )
+            / len(diagnostics),
+            "mean_unique_phases": sum(g["unique_phases"] for g in diagnostics)
+            / len(diagnostics),
+            "invalid_response_fraction": sum(r.action is None for r in rows)
+            / len(rows),
             "wall_seconds": time.perf_counter() - started,
             **learning,
         }
+        metrics["credit_status"] = (
+            "zero_advantage"
+            if metrics["zero_adv_group_fraction"] == 1
+            else "format_only"
+            if metrics["traffic_signal_group_fraction"] == 0
+            and metrics["invalid_response_fraction"] > 0
+            else "weak_traffic_signal"
+            if metrics["traffic_signal_group_fraction"] == 0
+            else "traffic_signal"
+        )
         if not scripted and round_number % config["eval_every"] == 0:
             # Evaluation changes no policy weights and must not consume behavior RNG.
             cpu_rng, gpu_rng = torch.get_rng_state(), torch.cuda.get_rng_state_all()

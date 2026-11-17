@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Local portability build. Binding upgrade is recorded, not a canonical paper environment."""
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import sys
@@ -10,6 +9,8 @@ from reproduce import ROOT, sha256
 
 def main():
     source = ROOT / 'vendor/CityFlow'
+    if not (source / 'CMakeLists.txt').is_file():
+        raise SystemExit(f'Missing CityFlow source: {source}')
     for name, original in [('pybind11', 'pybind11-v2.10.4'), ('rapidjson', 'rapidjson')]:
         dep = ROOT / 'vendor' / original
         if not dep.is_dir():
@@ -17,9 +18,16 @@ def main():
         target = source / 'extern' / name
         if not target.exists() or not any(target.iterdir()):
             shutil.copytree(dep, target, dirs_exist_ok=True)
+    for required in ('extern/pybind11/CMakeLists.txt',
+                     'extern/rapidjson/include/rapidjson/document.h',
+                     'extern/milo/dtoa_milo.h'):
+        if not (source / required).is_file():
+            raise SystemExit(f'Missing offline build input: {source / required}; '
+                             'upload complete source/dependency directories before building')
     build = ROOT / '.build/cityflow'
     subprocess.run(['cmake', '-S', str(source), '-B', str(build),
                     '-DPYTHON_EXECUTABLE=' + sys.executable,
+                    '-DGIT_SUBMODULE=OFF',
                     '-DCMAKE_POLICY_VERSION_MINIMUM=3.5',
                     '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + str(ROOT / '.build/python'),
                     '-DCMAKE_BUILD_TYPE=Release'], check=True)

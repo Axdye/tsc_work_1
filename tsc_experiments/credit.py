@@ -66,6 +66,22 @@ def label_group(responses, values, group_id, invalid_penalty):
     return responses
 
 
+def group_diagnostic(responses, group_id, time):
+    """Separate traffic discrimination from learning only an output format."""
+    valid = [r for r in responses if r.action is not None]
+    traffic_std = statistics.pstdev(r.reward for r in valid) if valid else 0.0
+    return {
+        "group": group_id,
+        "time": time,
+        "unique_phases": len({r.action for r in valid}),
+        "reward_std": statistics.pstdev(r.reward for r in responses),
+        "valid_traffic_reward_std": traffic_std,
+        "traffic_signal": traffic_std > 1e-10,
+        "zero_advantage": all(abs(r.advantage) < 1e-10 for r in responses),
+        "invalid_fraction": 1 - len(valid) / len(responses),
+    }
+
+
 class Collector:
     def __init__(self, env, policy, config, seed):
         import random
@@ -120,10 +136,6 @@ class Collector:
                             executed_action(candidates[i][k], e, i)
                             for i in range(len(e.names))
                         ]
-                        if c["reward_scope"] == "local":
-                            raise ValueError(
-                                "joint variant uses global reward; local is paired-only ablation"
-                            )
                         joint_scores.append(fork_return(e, snapshot, actions, p, c))
                     # Limit trained target groups identically to paired method.
                     for i in targets:
@@ -145,7 +157,8 @@ class Collector:
                         values = [[] for _ in candidates]
                         for m in range(c["contexts"]):
                             e.restore(snapshot)
-                            background, _ = joint_sample(e, p)
+                            if c["method"] == "paired":
+                                background, _ = joint_sample(e, p)
                             for k, response in enumerate(candidates):
                                 e.restore(snapshot)
                                 if c["method"] == "unpaired":
@@ -173,21 +186,7 @@ class Collector:
                 }
                 for gid in new_groups:
                     subset = [r for r in rows if r.metadata["group"] == gid]
-                    diagnostics.append(
-                        {
-                            "group": gid,
-                            "time": time,
-                            "unique_phases": len(
-                                {r.action for r in subset if r.action is not None}
-                            ),
-                            "reward_std": statistics.pstdev(r.reward for r in subset),
-                            "zero_advantage": all(
-                                abs(r.advantage) < 1e-10 for r in subset
-                            ),
-                            "invalid_fraction": sum(r.action is None for r in subset)
-                            / len(subset),
-                        }
-                    )
+                    diagnostics.append(group_diagnostic(subset, gid, time))
             finally:
                 e.restore(snapshot)
             e.step(actual_actions)
@@ -242,24 +241,11 @@ class Collector:
                     )
                     rows.append(r)
                 diagnostics.append(
-                    {
-                        "group": gid,
-                        "time": initial + t * e.interval,
-                        "reward_std": statistics.pstdev(group_values),
-                        "zero_advantage": all(abs(a) < 1e-10 for a in group_advs),
-                        "unique_phases": len(
-                            {
-                                trajectories[k][t][i].action
-                                for k in range(c["group_size"])
-                                if trajectories[k][t][i].action is not None
-                            }
-                        ),
-                        "invalid_fraction": sum(
-                            trajectories[k][t][i].action is None
-                            for k in range(c["group_size"])
-                        )
-                        / c["group_size"],
-                    }
+                    group_diagnostic(
+                        [trajectory[t][i] for trajectory in trajectories],
+                        gid,
+                        initial + t * e.interval,
+                    )
                 )
         return rows, diagnostics
 

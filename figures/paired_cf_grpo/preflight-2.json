@@ -1,0 +1,274 @@
+{
+  "file": "figures/paired_cf_grpo/overview.drawio",
+  "summary": {
+    "total_findings": 19,
+    "fail": 0,
+    "warn": 19,
+    "passed": true,
+    "clean": false
+  },
+  "fails": [],
+  "warns": [
+    {
+      "rule": "spacing-inconsistent-h",
+      "element_id": "junction_1_0",
+      "message": "Row at y≈309: horizontal gaps vary (gaps=['36', '29', '29', '1277'], mean=343, cv=1.57). Use uniform spacing.",
+      "detail": {
+        "row_y": 309,
+        "gaps": [
+          36.0,
+          29.0,
+          29.0,
+          1277.0
+        ],
+        "mean": 342.8,
+        "cv": 1.57,
+        "element_ids": [
+          "junction_1_0",
+          "junction_1_1",
+          "junction_1_2",
+          "junction_1_3",
+          "pool"
+        ]
+      }
+    },
+    {
+      "rule": "spacing-inconsistent-h",
+      "element_id": "junction_2_0",
+      "message": "Row at y≈353: horizontal gaps vary (gaps=['36', '36', '36', '107', '80', '45', '45', '28', '28'], mean=49, cv=0.52). Use uniform spacing.",
+      "detail": {
+        "row_y": 353,
+        "gaps": [
+          36.0,
+          36.0,
+          36.0,
+          107.0,
+          80.0,
+          45.0,
+          45.0,
+          28.0,
+          28.0
+        ],
+        "mean": 49.0,
+        "cv": 0.52,
+        "element_ids": [
+          "junction_2_0",
+          "junction_2_1",
+          "junction_2_2",
+          "junction_2_3",
+          "actor",
+          "reply_1",
+          "joint_1",
+          "state_1_0",
+          "state_1_1",
+          "state_1_2"
+        ]
+      }
+    },
+    {
+      "rule": "spacing-inconsistent-h",
+      "element_id": "reply_2",
+      "message": "Row at y≈500: horizontal gaps vary (gaps=['45', '460'], mean=252, cv=0.82). Use uniform spacing.",
+      "detail": {
+        "row_y": 500,
+        "gaps": [
+          45.0,
+          460.0
+        ],
+        "mean": 252.5,
+        "cv": 0.82,
+        "element_ids": [
+          "reply_2",
+          "joint_2",
+          "advantage"
+        ]
+      }
+    },
+    {
+      "rule": "decoration-block-cluster",
+      "element_id": "state_1_0",
+      "message": "Cluster of 3 adjacent colored shapes (ids: ['state_1_0', 'state_2_0', 'state_G_0'], colors: ['#f1d7d4'], labels: ['t', 't', 't']). These look like decorative token/matrix cells copied from a reference without semantic content. Either add meaningful text labels (not just '1 2 3 4') stating what each cell represents, or delete the cluster and replace with a single labeled box. Paper figures use colored cells to represent REAL data (tokens, matrix entries) — empty or trivially labeled cells are noise.",
+      "detail": {
+        "cluster_size": 3,
+        "element_ids": [
+          "state_1_0",
+          "state_2_0",
+          "state_G_0"
+        ],
+        "fill_colors": [
+          "#f1d7d4"
+        ],
+        "labels": [
+          "t",
+          "t",
+          "t"
+        ],
+        "rects": [
+          "1125,368 64×64",
+          "1125,518 64×64",
+          "1125,668 64×64"
+        ]
+      }
+    },
+    {
+      "rule": "solitary-decoration-block",
+      "element_id": "junction_1_2",
+      "message": "Isolated colored shape 'junction_1_2' (28x28, fill=#f1d7d4, label='i') has no semantic label. If it carries no meaning, delete it or replace with a labeled box.",
+      "detail": {
+        "element_id": "junction_1_2",
+        "fill_color": "#f1d7d4",
+        "label": "i",
+        "size": "28x28"
+      }
+    },
+    {
+      "rule": "solitary-decoration-block",
+      "element_id": "state_1_0",
+      "message": "Isolated colored shape 'state_1_0' (64x64, fill=#f1d7d4, label='t') has no semantic label. If it carries no meaning, delete it or replace with a labeled box.",
+      "detail": {
+        "element_id": "state_1_0",
+        "fill_color": "#f1d7d4",
+        "label": "t",
+        "size": "64x64"
+      }
+    },
+    {
+      "rule": "solitary-decoration-block",
+      "element_id": "state_2_0",
+      "message": "Isolated colored shape 'state_2_0' (64x64, fill=#f1d7d4, label='t') has no semantic label. If it carries no meaning, delete it or replace with a labeled box.",
+      "detail": {
+        "element_id": "state_2_0",
+        "fill_color": "#f1d7d4",
+        "label": "t",
+        "size": "64x64"
+      }
+    },
+    {
+      "rule": "solitary-decoration-block",
+      "element_id": "state_G_0",
+      "message": "Isolated colored shape 'state_G_0' (64x64, fill=#f1d7d4, label='t') has no semantic label. If it carries no meaning, delete it or replace with a labeled box.",
+      "detail": {
+        "element_id": "state_G_0",
+        "fill_color": "#f1d7d4",
+        "label": "t",
+        "size": "64x64"
+      }
+    },
+    {
+      "rule": "solitary-decoration-block",
+      "element_id": "legend_dot_input",
+      "message": "Isolated colored shape 'legend_dot_input' (18x18, fill=#e8f2f5, label='') has no semantic label. If it carries no meaning, delete it or replace with a labeled box.",
+      "detail": {
+        "element_id": "legend_dot_input",
+        "fill_color": "#e8f2f5",
+        "label": "",
+        "size": "18x18"
+      }
+    },
+    {
+      "rule": "solitary-decoration-block",
+      "element_id": "legend_dot_standard",
+      "message": "Isolated colored shape 'legend_dot_standard' (18x18, fill=#eaf0f6, label='') has no semantic label. If it carries no meaning, delete it or replace with a labeled box.",
+      "detail": {
+        "element_id": "legend_dot_standard",
+        "fill_color": "#eaf0f6",
+        "label": "",
+        "size": "18x18"
+      }
+    },
+    {
+      "rule": "solitary-decoration-block",
+      "element_id": "legend_dot_proposed",
+      "message": "Isolated colored shape 'legend_dot_proposed' (18x18, fill=#f1d7d4, label='') has no semantic label. If it carries no meaning, delete it or replace with a labeled box.",
+      "detail": {
+        "element_id": "legend_dot_proposed",
+        "fill_color": "#f1d7d4",
+        "label": "",
+        "size": "18x18"
+      }
+    },
+    {
+      "rule": "solitary-decoration-block",
+      "element_id": "legend_dot_update",
+      "message": "Isolated colored shape 'legend_dot_update' (18x18, fill=#f4eedc, label='') has no semantic label. If it carries no meaning, delete it or replace with a labeled box.",
+      "detail": {
+        "element_id": "legend_dot_update",
+        "fill_color": "#f4eedc",
+        "label": "",
+        "size": "18x18"
+      }
+    },
+    {
+      "rule": "solitary-decoration-block",
+      "element_id": "legend_dot_decision",
+      "message": "Isolated colored shape 'legend_dot_decision' (18x18, fill=#e5f1e3, label='') has no semantic label. If it carries no meaning, delete it or replace with a labeled box.",
+      "detail": {
+        "element_id": "legend_dot_decision",
+        "fill_color": "#e5f1e3",
+        "label": "",
+        "size": "18x18"
+      }
+    },
+    {
+      "rule": "orphan-empty-box",
+      "element_id": "cityflow",
+      "message": "Box 'cityflow' (260×236) has no text label. Add content or reduce size.",
+      "detail": {
+        "box_id": "cityflow",
+        "size": "260×236"
+      }
+    },
+    {
+      "rule": "orphan-empty-box",
+      "element_id": "evaluator",
+      "message": "Box 'evaluator' (750×560) has no text label. Add content or reduce size.",
+      "detail": {
+        "box_id": "evaluator",
+        "size": "750×560"
+      }
+    },
+    {
+      "rule": "edge-density-hotspot",
+      "element_id": "*",
+      "message": "Cell (0,200) has 13 edge segments — potential arrow spaghetti. Reroute connectors or add explicit waypoints.",
+      "detail": {
+        "cell_x": 0,
+        "cell_y": 200,
+        "edge_count": 13
+      }
+    },
+    {
+      "rule": "edge-density-hotspot",
+      "element_id": "*",
+      "message": "Cell (200,200) has 11 edge segments — potential arrow spaghetti. Reroute connectors or add explicit waypoints.",
+      "detail": {
+        "cell_x": 200,
+        "cell_y": 200,
+        "edge_count": 11
+      }
+    },
+    {
+      "rule": "edge-density-hotspot",
+      "element_id": "*",
+      "message": "Cell (600,400) has 9 edge segments — potential arrow spaghetti. Reroute connectors or add explicit waypoints.",
+      "detail": {
+        "cell_x": 600,
+        "cell_y": 400,
+        "edge_count": 9
+      }
+    },
+    {
+      "rule": "edge-density-hotspot",
+      "element_id": "*",
+      "message": "Cell (1200,400) has 6 edge segments — potential arrow spaghetti. Reroute connectors or add explicit waypoints.",
+      "detail": {
+        "cell_x": 1200,
+        "cell_y": 400,
+        "edge_count": 6
+      }
+    }
+  ],
+  "vertex_count": 68,
+  "edge_count": 53,
+  "canvas": "2000x920"
+}

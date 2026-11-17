@@ -18,6 +18,8 @@ python3 scripts/bootstrap.py --only CityFlow LLMTSCS CoLLMLight --build-deps
 - [训练、baseline、消融、评测、绘图与拥堵 GIF 运行手册](docs/CREDIT_EXPERIMENTS.md)
 - [TSC 定义、相关工作脉络、当前工作与下一篇快慢思考定位](docs/CREDIT_RESEARCH_STORY.md)
 - [实际验证范围与结果](docs/CREDIT_VALIDATION.md)
+- [第一篇工作代码覆盖、2026-11-18 修正与待验事项](docs/FIRST_WORK_READINESS.md)
+- [方法说明](docs/METHOD.md)
 
 新入口 `python scripts/tsc_experiment.py --help`。默认 Qwen3.5-0.8B＋LoRA，
 单卡单作业、8 卡并行方法与 seed；与下方历史固定状态 GRPO 原型分开。
