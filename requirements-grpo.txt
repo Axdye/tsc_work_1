@@ -1,0 +1,9 @@
+# Target APIs: Transformers 5.2.0 / TRL 0.29.0 (Qwen3.5 text-only policy).
+# Install a CUDA-compatible torch wheel for your driver.
+# These are target constraints, not a lockfile from a verified training run.
+torch>=2.6,<3
+transformers==5.2.0
+trl==0.29.0
+peft==0.18.1
+accelerate>=1.4,<2
+datasets>=3,<5

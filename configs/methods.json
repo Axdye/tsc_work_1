@@ -1,0 +1,23 @@
+{
+  "fixedtime": {"repo":"LLMTSCS", "entry":"run_fixedtime.py", "family":"cityflow-native", "stage":"eval"},
+  "maxpressure": {"repo":"LLMTSCS", "entry":"run_maxpressure.py", "family":"cityflow-native", "stage":"eval"},
+  "presslight": {"repo":"LLMTSCS", "entry":"run_presslight.py", "family":"cityflow-native", "stage":"train"},
+  "colight": {"repo":"LLMTSCS", "entry":"run_colight.py", "family":"cityflow-native", "stage":"train"},
+  "advanced-colight": {"repo":"LLMTSCS", "entry":"run_advanced_colight.py", "family":"cityflow-native", "stage":"train"},
+  "llmlight": {"repo":"LLMTSCS", "entry":"run_open_LLM_with_vllm.py", "family":"cityflow-native", "stage":"eval"},
+  "collmlight": {"repo":"CoLLMLight", "entry":"run_CoLLMlight.py", "family":"cityflow-native", "stage":"eval"},
+  "collmlight-sample": {"repo":"CoLLMLight", "entry":"run_fts.py", "family":"raw", "stage":"counterfactual-sample"},
+  "collmlight-reasoning-data": {"repo":"CoLLMLight", "entry":"reasoning_tuning_data_synth.py", "family":"raw", "stage":"teacher-generation"},
+  "collmlight-ppo": {"repo":"CoLLMLight", "entry":"ppo_ft.py", "family":"raw", "stage":"label-reward-PPO", "note":"Requires configured config/ppo_config.yaml; not online CityFlow PPO."},
+  "heraldlight": {"repo":"HeraldLight", "entry":"run_llama.py", "family":"raw", "stage":"eval", "note":"Upstream defaults select Hangzhou; audit/change dataset flags and hardcoded model/data paths before running."},
+  "heraldlight-sft": {"repo":"HeraldLight", "entry":"fintune/finetune_new.py", "family":"raw", "stage":"SFT", "note":"Requires upstream model and dataset paths."},
+  "heraldlight-ranking": {"repo":"HeraldLight", "entry":"fintune/RankTrainer/Trainer.py", "family":"raw", "stage":"ranking-training"},
+  "dynamiclight": {"repo":"HeraldLight", "entry":"run_dynamiclight.py", "family":"raw", "stage":"train", "blocked":"Upstream argparse has defaut=0 typo; fix in a documented adapter before launch."},
+  "la-light": {"repo":"LLM-Assisted-Light", "entry":"run_llm_tsc.py", "family":"tshub", "stage":"eval"},
+  "la-maxpressure": {"repo":"LLM-Assisted-Light", "entry":"run_maxpressure.py", "family":"tshub", "stage":"eval"},
+  "la-fixedtime": {"repo":"LLM-Assisted-Light", "entry":"run_fixtime.py", "family":"tshub", "stage":"eval"},
+  "genex-tsc": {"repo":"GENEX-TSC", "entry":"run_main.py", "family":"raw", "stage":"native", "note":"Audit config.py and model/data paths first; not interchangeable with CityFlow actions."},
+  "traffic-r1": {"repo":"LLMTSCS", "entry":"run_open_LLM_with_vllm.py", "family":"cityflow-native", "stage":"checkpoint-eval", "note":"Public 0.1 checkpoint only; adapt prompt to model card; no complete official training pipeline."},
+  "oracletsc": {"repo":null, "blocked":"No verified official implementation found; LibSignal is its environment, not OracleTSC implementation."},
+  "evosignal": {"repo":null, "blocked":"Official repository says source release upon acceptance; current page is not implementation."}
+}

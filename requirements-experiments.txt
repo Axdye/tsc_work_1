@@ -1,0 +1,11 @@
+# Target API versions; GPU training has not been executed in the author's CPU workspace.
+# Reuses the Qwen3.5 text-only loader from minimal_cityflow_grpo.py; no TRL required here.
+torch>=2.6,<3
+transformers==5.2.0
+peft==0.18.1
+accelerate>=1.4,<2
+numpy>=1.26,<3
+pandas>=2.2,<3
+matplotlib>=3.8,<4
+Pillow>=10,<13
+# CityFlow: build separately for this Python ABI; see docs/CREDIT_EXPERIMENTS.md.

@@ -1,0 +1,132 @@
+[
+  {
+    "file": "papers/llmlight.pdf",
+    "url": "https://arxiv.org/pdf/2312.16044",
+    "sha256": "b6959bc048f9d6fad2a54e85d3d542ea0f25d0a749bb9bef0048fc098afbe431",
+    "version_note": "See stored PDF first page"
+  },
+  {
+    "file": "papers/heraldlight.pdf",
+    "url": "https://arxiv.org/pdf/2511.00136",
+    "sha256": "e05cc99f80509785a05ec16d05cfed391469201e6a45293ce407b53268c01c18",
+    "version_note": "See stored PDF first page"
+  },
+  {
+    "file": "papers/oracletsc.pdf",
+    "url": "https://arxiv.org/pdf/2605.08516",
+    "sha256": "42b2910c0cc998729bca66b305857936a4d7175525f1b73f081b726e575f86b5",
+    "version_note": "See stored PDF first page"
+  },
+  {
+    "file": "papers/traffic-r1.pdf",
+    "url": "https://aclanthology.org/2026.acl-long.995.pdf",
+    "sha256": "ab66a8d4b815d24a7ae582f5ecabf0d7d2028ceeac8cd1469f2703716fa13be0",
+    "version_note": "See stored PDF first page"
+  },
+  {
+    "file": "papers/llm-assisted-light.pdf",
+    "url": "https://arxiv.org/pdf/2403.08337",
+    "sha256": "4570d4c8fba0481b85d3065cff0b4587abe3bc087b50b67d4f6c59d858ccadd1",
+    "version_note": "See stored PDF first page"
+  },
+  {
+    "file": "papers/collmlight-arxiv.pdf",
+    "url": "https://arxiv.org/pdf/2503.11739",
+    "sha256": "dbf2c35318a66d8fe8f76876de1578f6b1d241a848670c6e57e302c5c37e9b54",
+    "version_note": "CoLLMLight arXiv initial version; NOT ICLR final"
+  },
+  {
+    "url": "https://openreview.net/pdf/07b5ef2f45a88fefa5f4737f9eabfa0efb0a0ea0.pdf",
+    "version": "Published as ICLR 2026",
+    "local_pdf": false,
+    "access": "Official web full-text reader; terminal PDF download returned 403",
+    "verified_sections": [
+      "3.1",
+      "3.2",
+      "4.1-4.6",
+      "A.5",
+      "A.8",
+      "A.14"
+    ]
+  },
+  {
+    "file": "papers/processlight.pdf",
+    "url": "https://arxiv.org/pdf/2609.22746",
+    "sha256": "b8810ced663ac9eff92be305d426ee81f5bc52468386fd4095f9a7c540733a25",
+    "version_note": "Supplemental nearest-neighbor reading; method, results, limitations, and core code"
+  },
+  {
+    "file": "papers/x-light.pdf",
+    "url": "https://arxiv.org/pdf/2404.12090v2",
+    "sha256": "10b5dd711099756457915aa68b57e74211693433cb4dc399ce4b8f50abef884c",
+    "version_note": "IJCAI 2024 extended arXiv v2",
+    "reading_scope": "Main-text method, experiments and limitations; relevant appendix/core code, not exhaustive line-by-line audit"
+  },
+  {
+    "file": "papers/unicorn.pdf",
+    "url": "https://arxiv.org/pdf/2503.11488v2",
+    "sha256": "b8f6b30a167ec5681a1d226ed59c929b3701fb85e6e11fe22cc018095cdd2f14",
+    "version_note": "T-ITS 2026; arXiv v2 dated 2026-03-25",
+    "reading_scope": "Main-text method, experiments and limitations; relevant appendix/core code, not exhaustive line-by-line audit"
+  },
+  {
+    "file": "papers/datalight-v2.pdf",
+    "url": "https://arxiv.org/pdf/2303.10828v2",
+    "sha256": "49f64376826864a77ea99a044f20c76b8dc93840470fbf6b424d8a06214bd5c5",
+    "version_note": "Historical v2 2024; not claimed identical to ECML PKDD 2026/2027 proceedings",
+    "reading_scope": "Main-text method, experiments and limitations; relevant appendix/core code, not exhaustive line-by-line audit"
+  },
+  {
+    "file": "papers/illm-tsc.pdf",
+    "url": "https://arxiv.org/pdf/2407.06025v1",
+    "sha256": "8fba9e635b76d71e3f23a42b3c8ed118377365eecf5c562265a1aa5bce86f582",
+    "version_note": "Read arXiv v1, not the TVT 2026 version of record",
+    "reading_scope": "Main-text method, experiments and limitations; relevant appendix/core code, not exhaustive line-by-line audit"
+  },
+  {
+    "file": "papers/robustlight.pdf",
+    "url": "https://api.github.com/repos/mlresearch/v267/contents/assets/li25cs/li25cs.pdf?ref=main",
+    "sha256": "27b129133788a47334d4485ad9f250a7c218387d55d96223aae469c628ae67b5",
+    "version_note": "ICML 2025 official PMLR PDF bytes via GitHub raw API",
+    "reading_scope": "Main-text method, experiments and limitations; relevant appendix/core code, not exhaustive line-by-line audit"
+  },
+  {
+    "file": "papers/promptgat.pdf",
+    "url": "https://ojs.aaai.org/index.php/AAAI/article/download/27758/27557",
+    "sha256": "4043c57f84cea05f438b703adaf45a33dcf4578c54b5ab1388f2d3929debc225",
+    "version_note": "AAAI 2024 official PDF",
+    "reading_scope": "Main-text method, experiments and limitations; relevant appendix/core code, not exhaustive line-by-line audit"
+  },
+  {
+    "file": "papers/vlmlight.pdf",
+    "url": "https://proceedings.neurips.cc/paper_files/paper/2025/file/3849b5861dcaeaf4758eef0979a98cc6-Paper-Conference.pdf",
+    "sha256": "07fad4a4f68635169bca4ebdb5dd694cb143be2817210cbdb17e17bcdb0acd9e",
+    "version_note": "NeurIPS 2025 official PDF",
+    "reading_scope": "Main-text method, experiments and limitations; relevant appendix/core code, not exhaustive line-by-line audit"
+  },
+  {
+    "file": "papers/dglight.pdf",
+    "url": "https://github.com/yyccbb/FYP_LLMTSC/blob/main/docs/arxiv_paper.pdf",
+    "sha256": "8fa2d0fe06332481ff22620d9cb1ef9b34e8f5acfa3e1de1fdcd8b89faa89889",
+    "version_note": "Author repository PDF; compared against arXiv 2604.25259v1",
+    "reading_scope": "Main-text method, experiments and limitations; relevant appendix/core code, not exhaustive line-by-line audit"
+  },
+  {
+    "url": "https://arxiv.org/html/2211.01025v2",
+    "local_pdf": false,
+    "version_note": "DynamicLight v2 main text and relevant appendices; terminal PDF incomplete",
+    "access": "Official full-text web reader"
+  },
+  {
+    "url": "https://arxiv.org/html/2512.09368v2",
+    "local_pdf": false,
+    "version_note": "CFLight main text and algorithms; KDD 2026, preprint header has inconsistent event date",
+    "access": "Official full-text web reader"
+  },
+  {
+    "url": "https://ietresearch.onlinelibrary.wiley.com/doi/full/10.1049/cit2.70113",
+    "local_pdf": false,
+    "version_note": "GenEx-TSC official 2026 journal full text",
+    "access": "Official full-text web reader"
+  }
+]
