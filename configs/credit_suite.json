@@ -1,20 +1,47 @@
 {
   "base_config": "credit_main.json",
-  "checkpoint": "final",
-  "train_seeds": [0, 1, 2],
-  "eval_seeds": [0, 1, 2],
-  "test_datasets": ["jinan1", "jinan2", "jinan3", "hangzhou1", "hangzhou2"],
-  "baselines": ["fixedtime", "maxpressure", "llm"],
+  "train_seeds": [
+    0,
+    1,
+    2
+  ],
+  "eval_seeds": [
+    0,
+    1
+  ],
+  "test_datasets": [
+    "jinan1",
+    "jinan3",
+    "hangzhou1"
+  ],
+  "baselines": [
+    "fixedtime",
+    "maxpressure",
+    "llm"
+  ],
   "variants": {
-    "paired": {"method": "paired"},
-    "unpaired": {"method": "unpaired"},
-    "joint": {"method": "joint"},
-    "trajectory": {"method": "trajectory", "collect_steps": 8},
-    "rtg": {"method": "rtg", "collect_steps": 8},
-    "paired-h1": {"method": "paired", "horizon": 1},
-    "paired-h6": {"method": "paired", "horizon": 6},
-    "paired-rule": {"method": "paired", "continuation": "maxpressure"},
-    "paired-local": {"method": "paired", "reward_scope": "local"},
-    "paired-m2": {"method": "paired", "contexts": 2}
-  }
+    "full": {},
+    "trajectory": {
+      "method": "trajectory"
+    },
+    "rtg": {
+      "method": "rtg"
+    },
+    "joint": {
+      "method": "joint"
+    },
+    "cf-only": {
+      "cf_weight": 1.0
+    },
+    "uniform": {
+      "cf_baseline": "uniform"
+    },
+    "h1": {
+      "horizon": 1
+    },
+    "colight": {
+      "method": "colight"
+    }
+  },
+  "wall_match": true
 }

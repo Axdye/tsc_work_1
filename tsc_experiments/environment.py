@@ -9,6 +9,8 @@ from __future__ import annotations
 import contextlib
 import copy
 import io
+import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -37,6 +39,22 @@ DATASETS = {
         "anon_28_7_newyork_real_triple.json",
     ),
 }
+
+
+def prompt(observation):
+    return [
+        {"role": "system", "content": SYSTEM},
+        {"role": "user", "content": json.dumps(observation, ensure_ascii=False)},
+    ]
+
+
+def cluster_features(observation):
+    phases = observation["phase_observations"]
+    return [
+        phases[phase][field]
+        for field in ("incoming_queued", "incoming_running", "receiving_occupancy")
+        for phase in PHASES
+    ] + [int(observation["current_phase"] == phase) for phase in PHASES]
 
 
 def dataset_paths(name):
@@ -126,6 +144,34 @@ class TrafficEnvironment:
             if not i["virtual"]
         }
         self._validate_phases()
+        self.neighbors = [
+            tuple(self.env.id_to_index.get(n) for n in
+                  self.env.traffic_light_node_dict[name]["neighbor_ENWS"])
+            for name in self.names
+        ]
+        roads = {}
+        controlled = set(self.names)
+        for road_config in self.roadnet["roads"]:
+            points = road_config["points"]
+            length = sum(math.hypot(a["x"] - b["x"], a["y"] - b["y"])
+                         for a, b in zip(points, points[1:]))
+            if road_config["endIntersection"] in controlled:
+                roads[road_config["id"]] = max(1, int(length / 7.5))
+        self.phase_lanes = [
+            [
+                (
+                    sorted({lane for lane, _ in pairs}),
+                    sorted({lane for _, targets in pairs for lane in targets}),
+                )
+                for pairs in (self.movements[name][phase] for phase in range(1, 5))
+            ]
+            for name in self.names
+        ]
+        self.receiving_capacity = {
+            lane: roads[lane.rsplit("_", 1)[0]]
+            for states in self.phase_lanes for _, outgoing in states for lane in outgoing
+            if lane.rsplit("_", 1)[0] in roads
+        }
         self.agents = {
             kind: [
                 cls(
@@ -271,53 +317,38 @@ class TrafficEnvironment:
             for agent, obs in zip(self.agents[kind], state)
         ]
 
-    def prompt(self, index):
-        name = self.names[index]
-        q = self.env.eng.get_lane_waiting_vehicle_count()
+    def observations(self):
+        queued = self.env.eng.get_lane_waiting_vehicle_count()
         counts = self.env.eng.get_lane_vehicle_count()
-        features = {}
-        for action, label in enumerate(PHASES):
-            pairs = self.movements[name][action + 1]
-            incoming = {a for a, _ in pairs}
-            outgoing = {b for _, bs in pairs for b in bs}
-            features[label] = {
-                "incoming_queued": sum(q.get(x, 0) for x in incoming),
-                "incoming_running": sum(
-                    max(0, counts.get(x, 0) - q.get(x, 0)) for x in incoming
-                ),
-                "receiving_queued": sum(q.get(x, 0) for x in outgoing),
-                "receiving_vehicles": sum(counts.get(x, 0) for x in outgoing),
-            }
-        node = self.env.list_intersection[index]
-        neighbors = self.env.traffic_light_node_dict[name]["neighbor_ENWS"]
-        if isinstance(neighbors, dict):
-            neighbors = list(neighbors.values())
-        demand = {
-            n: float(
-                sum(
-                    self.env.list_intersection[self.env.id_to_index[n]].dic_feature[
-                        "lane_num_waiting_vehicle_in"
-                    ]
-                )
-            )
-            for n in neighbors
-            if n in self.env.id_to_index
-        }
-        phase = node.current_phase_index
-        observation = {
-            "intersection": name,
-            "time_seconds": self.time,
-            "current_phase": PHASES[phase - 1] if phase in range(1, 5) else "clearance",
-            "decision_interval_seconds": self.interval,
-            "phase_observations": features,
-            "neighbor_total_queues": demand,
-        }
-        import json
-
-        return [
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": json.dumps(observation, ensure_ascii=False)},
-        ]
+        neighbor_queues = self.queues()
+        observations = []
+        for index, node in enumerate(self.env.list_intersection):
+            features = {}
+            for label, (incoming, outgoing) in zip(PHASES, self.phase_lanes[index]):
+                receiving = [lane for lane in outgoing if lane in self.receiving_capacity]
+                capacity = sum(self.receiving_capacity[lane] for lane in receiving)
+                features[label] = {
+                    "incoming_queued": sum(queued.get(lane, 0) for lane in incoming),
+                    "incoming_running": sum(
+                        max(0, counts.get(lane, 0) - queued.get(lane, 0)) for lane in incoming
+                    ),
+                    "receiving_queued": sum(queued.get(lane, 0) for lane in outgoing),
+                    "receiving_vehicles": sum(counts.get(lane, 0) for lane in outgoing),
+                    "receiving_occupancy": min(1.0, sum(counts.get(lane, 0) for lane in receiving)
+                                               / capacity) if capacity else 0.0,
+                }
+            phase = node.current_phase_index
+            observations.append({
+                "intersection": self.names[index],
+                "time_seconds": self.time,
+                "current_phase": PHASES[phase - 1] if phase in range(1, 5) else "clearance",
+                "decision_interval_seconds": self.interval,
+                "phase_observations": features,
+                "neighbor_total_queues_ENWS": [
+                    neighbor_queues[n] if n is not None else None for n in self.neighbors[index]
+                ],
+            })
+        return observations
 
     def metrics(self, measurements):
         from cpu_upstream_baselines import upstream_metrics

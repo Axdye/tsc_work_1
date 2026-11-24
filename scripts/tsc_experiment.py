@@ -8,7 +8,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from tsc_experiments.common import configuration
+from tsc_experiments.common import configuration, read_json, validate_config
 
 
 def main():
@@ -20,6 +20,7 @@ def main():
         s.add_argument("--set", action="append", default=[], metavar="KEY=JSON")
         s.add_argument("--output", required=True)
         if name == "train":
+            s.add_argument("--match-wall-to", help="Summary.json for the full run with the same seed")
             s.add_argument(
                 "--scripted",
                 action="store_true",
@@ -30,7 +31,7 @@ def main():
             s.add_argument("--seed", type=int)
             s.add_argument(
                 "--policy",
-                choices=["llm", "fixedtime", "maxpressure", "scripted"],
+                choices=["llm", "fixedtime", "maxpressure", "scripted", "colight"],
                 default="llm",
             )
             s.add_argument("--adapter")
@@ -62,16 +63,27 @@ def main():
     s.add_argument("--config", default=str(ROOT / "configs/credit_smoke.json"))
     s.add_argument("--set", action="append", default=[])
     s.add_argument("--output", required=True)
-    s.add_argument("--states", type=int, default=4)
-    s.add_argument("--repeats", type=int, default=8)
-    s.add_argument("--reference-contexts", type=int, default=32)
+    s.add_argument("--states", type=int, default=12)
     s.add_argument("--scripted", action="store_true")
-    s.add_argument("--adapter")
+    s.add_argument("--training-run", help="Full-method training directory with final adapter and clusters")
     args = parser.parse_args()
     if args.command == "train":
         from tsc_experiments.runner import train
 
-        result = train(configuration(args.config, args.set), args.output, args.scripted)
+        config = configuration(args.config, args.set)
+        if args.match_wall_to:
+            if config["method"] != "trajectory" or args.scripted:
+                parser.error("--match-wall-to is for learned Trajectory-GRPO")
+            reference = Path(args.match_wall_to)
+            summary = read_json(reference)
+            reference_config = read_json(reference.parent / "config.json")
+            if (summary.get("scripted") or reference_config["method"] != "counterfactual"
+                    or config["seed"] != reference_config["seed"]):
+                parser.error("Wall-clock reference must be the trained counterfactual run with the same seed")
+            config.update(max_wall_seconds=summary["wall_seconds"], max_responses=0,
+                          rounds=2**31, wall_reference=str(reference.resolve()))
+            validate_config(config)
+        result = train(config, args.output, args.scripted)
     elif args.command == "evaluate":
         from tsc_experiments.runner import evaluate
 
@@ -123,10 +135,8 @@ def main():
             configuration(args.config, args.set),
             args.output,
             args.states,
-            args.repeats,
-            args.reference_contexts,
             args.scripted,
-            args.adapter,
+            args.training_run,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

@@ -19,7 +19,12 @@ def make_plan(spec_path, output, model=None):
         base["model"] = model
     out.mkdir(parents=True, exist_ok=True)
     jobs = []
-    for variant, changes in spec["variants"].items():
+    variants = dict(spec["variants"])
+    if spec.get("wall_match"):
+        if "full" not in variants or "trajectory" not in variants:
+            raise ValueError("Wall-clock matching needs full and trajectory variants")
+        variants["trajectory-wall"] = variants["trajectory"]
+    for variant, changes in variants.items():
         for seed in spec["train_seeds"]:
             config = validate_config({**base, **changes, "seed": seed})
             config_path = out / "configs" / f"{variant}-s{seed}.json"
@@ -30,12 +35,18 @@ def make_plan(spec_path, output, model=None):
             write_json(config_path, config)
             train_id = f"train-{variant}-s{seed}"
             train_out = out / "train" / f"{variant}-s{seed}"
+            wall_reference = (
+                str(out / "train" / f"full-s{seed}" / "summary.json")
+                if variant == "trajectory-wall" else None
+            )
+            gpu = config["method"] != "colight"
             jobs.append(
                 {
                     "id": train_id,
                     "kind": "train",
-                    "gpu": True,
-                    "depends": [],
+                    "gpu": gpu,
+                    "depends": [f"train-full-s{seed}"] if wall_reference else [],
+                    "match_wall_to": wall_reference,
                     "config": str(config_path),
                     "output": str(train_out),
                 }
@@ -46,7 +57,7 @@ def make_plan(spec_path, output, model=None):
                         {
                             "id": f"eval-{variant}-s{seed}-{dataset}-e{eval_seed}",
                             "kind": "evaluate",
-                            "gpu": True,
+                            "gpu": gpu,
                             "depends": [train_id],
                             "config": str(config_path),
                             "output": str(
@@ -56,11 +67,10 @@ def make_plan(spec_path, output, model=None):
                             ),
                             "dataset": dataset,
                             "seed": eval_seed,
-                            "policy": "llm",
+                            "policy": "llm" if gpu else "colight",
                             "method_label": variant,
                             "train_seed": seed,
                             "train_output": str(train_out),
-                            "selection": spec["checkpoint"],
                         }
                     )
     for dataset in spec["test_datasets"]:
@@ -88,8 +98,7 @@ def make_plan(spec_path, output, model=None):
     plan = {
         "spec": spec,
         "jobs": jobs,
-        "note": "All jobs use one process; CUDA_VISIBLE_DEVICES selects one GPU. "
-        "No torchrun/DDP. Checkpoint selection uses synthetic validation, not the test cities.",
+        "note": "One GPU per LLM job; counterfactual workers only use CPU. Final checkpoints only.",
     }
     if (out / "plan.json").exists() and read_json(out / "plan.json") != plan:
         raise ValueError("Existing plan differs; use a new output directory")
@@ -107,6 +116,8 @@ def command(job):
         "--output",
         job["output"],
     ]
+    if job.get("match_wall_to"):
+        cmd += ["--match-wall-to", job["match_wall_to"]]
     if job["kind"] == "evaluate":
         cmd += [
             "--dataset",
@@ -120,10 +131,10 @@ def command(job):
         ]
         if "train_output" in job:
             summary = read_json(Path(job["train_output"]) / "summary.json")
-            key = "best_adapter" if job["selection"] == "best" else "final_adapter"
-            if not summary[key]:
-                raise RuntimeError(f"No {key} checkpoint in {job['train_output']}")
-            cmd += ["--adapter", summary[key], "--train-seed", str(job["train_seed"])]
+            adapter = summary["final_adapter"]
+            if not adapter:
+                raise RuntimeError(f"No final checkpoint in {job['train_output']}")
+            cmd += ["--adapter", adapter, "--train-seed", str(job["train_seed"])]
     return cmd
 
 
@@ -162,7 +173,7 @@ def execute(plan, output, gpus):
                 log = (folder / f"{name}.log").open("a")
                 env = dict(os.environ)
                 env["CUDA_VISIBLE_DEVICES"] = str(gpu) if gpu is not None else ""
-                env.setdefault("OMP_NUM_THREADS", "4")
+                env.setdefault("OMP_NUM_THREADS", "1")
                 env.setdefault("TOKENIZERS_PARALLELISM", "false")
                 try:
                     cmd = command(job)

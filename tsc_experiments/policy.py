@@ -9,6 +9,41 @@ import re
 from .common import PHASES
 
 
+def load_policy(model_path, device, local_files_only=False):
+    import torch
+    from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path, padding_side="left", local_files_only=local_files_only)
+    if not tokenizer.chat_template:
+        raise ValueError("Choose an instruction model with a chat template")
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    config = AutoConfig.from_pretrained(model_path, local_files_only=local_files_only)
+    load_kwargs = {"dtype": torch.bfloat16, "attn_implementation": "sdpa",
+                   "output_loading_info": True, "local_files_only": local_files_only}
+    if config.model_type in {"qwen3_5", "qwen3_5_text"}:
+        from transformers import Qwen3_5ForCausalLM
+        # The official checkpoint has model.language_model.* and model.visual.*.
+        # Instantiate only the text backbone; rename its weights explicitly.
+        if config.model_type == "qwen3_5":
+            load_kwargs["key_mapping"] = {r"^model\.language_model\.": "model."}
+            config = config.text_config
+        model, loading_info = Qwen3_5ForCausalLM.from_pretrained(
+            model_path, config=config, **load_kwargs)
+    else:
+        model, loading_info = AutoModelForCausalLM.from_pretrained(
+            model_path, config=config, **load_kwargs)
+    # Fail on missing language weights instead of training random initialization.
+    if loading_info.get("missing_keys") or loading_info.get("mismatched_keys") or loading_info.get("error_msgs"):
+        raise RuntimeError(f"Incomplete policy checkpoint loading: {loading_info}")
+    unexpected = [key for key in loading_info.get("unexpected_keys", [])
+                  if not key.startswith(("model.visual.", "mtp.", "model.mtp."))]
+    if unexpected:
+        raise RuntimeError(f"Unexpected non-vision checkpoint weights: {unexpected}")
+    model.to(device)
+    return model, tokenizer
+
+
 def parse_action(text):
     tags = re.findall(r"<signal>(.*?)</signal>", text, flags=re.I | re.S)
     if len(tags) != 1:
@@ -54,10 +89,6 @@ class LLMPolicy:
     def __init__(self, config, trainable=False, adapter=None):
         import torch
         from peft import LoraConfig, PeftModel, get_peft_model
-        from .environment import enable_local_dependencies
-
-        enable_local_dependencies()
-        from minimal_cityflow_grpo import load_policy
 
         if not torch.cuda.is_available():
             raise RuntimeError(

@@ -1,212 +1,162 @@
-"""Credit/budget/branch-restoration invariants, independent of GPU downloads."""
+"""Focused regression checks for the Work 2 collector and advantage estimator."""
 
-from pathlib import Path
-from types import SimpleNamespace
-import copy
+from collections import Counter
 import importlib.util
+import math
+from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from tsc_experiments.common import (
-    configuration,
-    standardize,
-    returns_to_go,
-    validate_config,
-)
+
+from tsc_experiments.branches import score_slice
+from tsc_experiments.common import PHASES, configuration, validate_config
+from tsc_experiments.credit import Collector, loo_probabilities, set_counterfactual_advantages
 from tsc_experiments.policy import Response, ScriptedPolicy, parse_action
-from tsc_experiments.credit import Collector, label_group, group_diagnostic
+from tsc_experiments.suite import make_plan
 
 
 class FakeEnv:
-    """Neighbor-sensitive known action value with snapshot-visible Python timers."""
-
     names = ["i0", "i1"]
-    interval = 1
-    horizon = 40
+    interval, horizon = 1, 4
 
     def __init__(self):
-        self.time, self.sim_seconds = 0, 0
-        self.env = SimpleNamespace(
-            list_intersection=[
-                SimpleNamespace(current_phase_index=1) for _ in self.names
-            ]
-        )
+        self.time = self.sim_seconds = 0
+        self.phases = [0, 0]
 
     @property
     def remaining_steps(self):
         return self.horizon - self.time
 
-    def prompt(self, i):
-        return [{"role": "user", "content": f"{i}/{self.time}"}]
+    def observations(self):
+        return [{
+            "current_phase": PHASES[phase],
+            "phase_observations": {
+                label: {"incoming_queued": 1, "incoming_running": 0, "receiving_occupancy": 0}
+                for label in PHASES
+            }
+        } for phase in self.phases]
 
     def snapshot(self):
-        return self.time, copy.deepcopy(self.env)
+        return self.time, self.phases[:]
 
-    def restore(self, state):
-        self.time, self.env = copy.deepcopy(state)
+    def restore(self, snapshot):
+        self.time, self.phases = snapshot[0], snapshot[1][:]
 
     def rule_actions(self):
         return [0, 0]
 
     def step(self, actions):
+        if not self.remaining_steps:
+            raise ValueError("Crossed cutoff")
         self.time += 1
         self.sim_seconds += 1
-        for node, a in zip(self.env.list_intersection, actions):
-            node.current_phase_index = a + 1
-        return {
-            "queue_costs": [10 + actions[0] + 8 * actions[1], 10 + actions[1]],
-            "time": self.time,
-        }
+        self.phases = list(actions)
+        return {"queue_costs": [10 + actions[0] + 8 * actions[1], 10 + actions[1]]}
+
+
+class OneCluster:
+    def predict(self, features):
+        return [0] * len(features)
 
 
 class CreditTests(unittest.TestCase):
     def config(self, **changes):
-        return {
-            **configuration(ROOT / "configs/credit_smoke.json"),
-            "collect_steps": 2,
-            "targets_per_state": 2,
-            "horizon": 3,
-            **changes,
-        }
+        return {**configuration(ROOT / "configs/credit_smoke.json"), **changes}
 
-    def test_strict_signal_parser_and_group_zero_variance(self):
+    def test_fixed_horizon_cache_and_interference(self):
+        env = FakeEnv()
+        snapshot = env.snapshot()
+        scores, first_reward = score_slice(env, [1, 2], 2, 0.95)
+        self.assertEqual(first_reward, -39)
+        self.assertEqual(scores[0], [-57, -58, -59, -60])
+        self.assertEqual(scores[1], [-40, -49, -58, -67])
+        self.assertEqual(env.sim_seconds, (1 + 3 * 2) * 2)
+        self.assertEqual(env.snapshot(), snapshot)
+
+    def test_full_window_budget_includes_last_full_horizon(self):
+        for method in ("counterfactual", "joint", "trajectory", "rtg"):
+            with self.subTest(method=method):
+                env, policy = FakeEnv(), ScriptedPolicy(1)
+                env.time = 1  # Last valid start given T=2, H=2.
+                collector = Collector(env, policy, self.config(method=method), OneCluster())
+                rows, info = collector.collect()
+                self.assertEqual(env.time, 3)
+                self.assertFalse(collector.ready)
+                self.assertEqual(policy.calls, collector.response_cost)
+                self.assertEqual(len(rows), 16)
+                self.assertEqual(env.sim_seconds, info["main_trajectory_sim_seconds"] + info["branch_sim_seconds"])
+                if method == "counterfactual":
+                    self.assertEqual(info["branch_sim_seconds"], 4 * 2 * 7 * 2)
+                    self.assertTrue(all(len(r.metadata["candidate_returns"]) == 4 for r in rows))
+                with self.assertRaises(ValueError):
+                    collector.collect()
+
+    def test_loo_removes_only_self_and_excludes_invalid(self):
+        self.assertEqual(loo_probabilities(Counter({0: 2, 1: 1}), 0, 1),
+                         [2/6, 2/6, 1/6, 1/6])
+        rows = [Response([], [], [], "", action, advantage=-1.0 if action is None else 2.0)
+                for action in (0, 0, 1, None)]
+        scores = [[4, 0, 0, 0]] * 4
+        info = set_counterfactual_advantages(
+            rows, [0, 0, 1, 1], scores, self.config(cluster_min=2)
+        )
+        self.assertEqual(info["cluster_sizes"], {0: 2, 1: 1})
+        self.assertEqual(rows[0].metadata["loo_probabilities"], [2/5, 1/5, 1/5, 1/5])
+        self.assertEqual(rows[2].metadata["loo_probabilities"], [3/6, 1/6, 1/6, 1/6])
+        self.assertEqual(info["cluster_fallback_rate"], 1/3)
+        self.assertAlmostEqual(info["cf_rms"], math.sqrt((2.4**2 * 2 + 4) / 3))
+        self.assertEqual(rows[3].advantage, -1.0)
+        self.assertNotIn("cluster", rows[3].metadata)
+
+    def test_flat_rewards_and_symmetric_clipping(self):
+        cfg = self.config(cf_baseline="uniform", cf_weight=1.0, cf_clip=0.3)
+        rows = [Response([], [], [], "", action) for action in (0, 1, 2)]
+        info = set_counterfactual_advantages(rows, [0]*3, [[100, 0, 50, 50]]*3, cfg)
+        self.assertEqual([r.advantage for r in rows], [0.3, -0.3, 0])
+        self.assertEqual(info["cf_clip_fraction"], 2/3)
+        info = set_counterfactual_advantages(rows, [0]*3, [[-14]*4]*3, self.config())
+        self.assertAlmostEqual(info["cf_rms"], 0.0)
+
+    def test_budget_and_suite(self):
+        c = configuration(ROOT / "configs/credit_main.json")
+        self.assertEqual(c["rounds"] * c["group_size"] * c["collect_steps"] * 16, c["max_responses"])
+        for changes in ({"horizon": 9}, {"method": "paired"}, {"train_seconds": 2701},
+                        {"cf_weight": 1.1}, {"rms_floor": float("nan")}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                validate_config({**c, **changes})
+        with tempfile.TemporaryDirectory() as path:
+            plan = make_plan(ROOT / "configs/credit_suite.json", path)
+            trains = {j["id"]: j for j in plan["jobs"] if j["kind"] == "train"}
+            self.assertEqual(len(trains), 27)
+            self.assertFalse(trains["train-colight-s0"]["gpu"])
+            self.assertEqual(trains["train-trajectory-wall-s0"]["depends"], ["train-full-s0"])
+
+    def test_phase_parser(self):
         self.assertEqual(parse_action("Reason. <signal>etwt</signal>"), 0)
         self.assertIsNone(parse_action("ETWT"))
         self.assertIsNone(parse_action("<signal>ETWT</signal><signal>NTST</signal>"))
-        self.assertEqual(standardize([4, 4, 4]), [0, 0, 0])
-        self.assertEqual(returns_to_go([1, 2, 3], 0.5), [2.75, 3.5, 3])
-
-    def test_same_phase_texts_share_score_and_invalid_receives_penalty(self):
-        rows = [
-            Response([], [], [1], text, action)
-            for text, action in [("a", 0), ("b", 0), ("bad", None), ("c", 1)]
-        ]
-        label_group(rows, [-10, -20, -4, -30], "group", 100)
-        self.assertEqual([r.reward for r in rows], [-15, -15, -104, -30])
-        self.assertAlmostEqual(sum(r.advantage for r in rows), 0)
-
-    def test_all_collectors_budget_and_main_state(self):
-        for method in ("paired", "unpaired", "joint", "trajectory", "rtg"):
-            with self.subTest(method=method):
-                env = FakeEnv()
-                collector = Collector(
-                    env, ScriptedPolicy(1), self.config(method=method), 1
-                )
-                expected = collector.window_cost()
-                rows, diagnostics = collector.collect()
-                self.assertEqual(env.sim_seconds, expected)
-                self.assertEqual(
-                    env.time, 2
-                )  # Forks must not advance deployed trajectory.
-                self.assertEqual(len(rows), 16)
-                self.assertTrue(diagnostics)
-                self.assertTrue(all(r.metadata["method"] == method for r in rows))
-
-    def test_short_horizon_budget_never_passes_terminal(self):
-        env = FakeEnv()
-        env.time = env.horizon - 1
-        collector = Collector(env, ScriptedPolicy(2), self.config(), 2)
-        expected = collector.window_cost()
-        collector.collect()
-        self.assertEqual(env.time, env.horizon)
-        self.assertEqual(env.sim_seconds, expected)
-
-    def test_paired_removes_known_first_step_background_variance(self):
-        from tsc_experiments.diagnostics import action_values
-
-        env = FakeEnv()
-        c = self.config(horizon=1)
-        state = env.snapshot()
-        # Under common background, changing a_i by one increases cost by exactly one.
-        for seed in range(5):
-            values = action_values(env, state, 0, ScriptedPolicy(seed), c, 1, True)
-            self.assertEqual(values[0] - values[1], 1)
-        self.assertEqual(env.time, 0)
-
-    def test_background_generation_has_no_discarded_batch(self):
-        from tsc_experiments.diagnostics import action_values
-
-        # Two nodes, G=4, M=2, H=1: deployment + candidates + used backgrounds.
-        for method, expected in (
-            ("paired", 2 + 4 + 2 * 2),
-            ("unpaired", 2 + 4 + 2 * 4 * 2),
-        ):
-            env, policy = FakeEnv(), ScriptedPolicy(0)
-            c = self.config(
-                method=method,
-                collect_steps=1,
-                targets_per_state=1,
-                horizon=1,
-                contexts=2,
-            )
-            Collector(env, policy, c, 0).collect()
-            self.assertEqual(policy.calls, expected)
-        for paired, expected in ((True, 2 * 2), (False, 2 * 4 * 2)):
-            env, policy = FakeEnv(), ScriptedPolicy(0)
-            action_values(
-                env, env.snapshot(), 0, policy, self.config(horizon=1), 2, paired
-            )
-            self.assertEqual(policy.calls, expected)
-
-    def test_format_signal_is_distinguished_from_traffic_contrast(self):
-        rows = [Response([], [], [1], "", action) for action in (0, 0, None, 0)]
-        label_group(rows, [-10, -10, -10, -10], "g", 100)
-        stats = group_diagnostic(rows, "g", 0)
-        self.assertFalse(stats["zero_advantage"])
-        self.assertFalse(stats["traffic_signal"])
-        self.assertEqual(stats["unique_phases"], 1)
-        rows[-1].action = 1
-        label_group(rows, [-10, -10, -10, -20], "g", 100)
-        self.assertTrue(group_diagnostic(rows, "g", 0)["traffic_signal"])
-
-    def test_unsupported_or_nonfinite_configuration_fails_before_collection(self):
-        for change in (
-            {"method": "joint", "reward_scope": "local"},
-            {"method": "joint", "contexts": 2},
-            {"method": "trajectory", "continuation": "maxpressure"},
-            {"method": "rtg", "reward_scope": "local"},
-            {"invalid_penalty": -1},
-            {"invalid_penalty": float("nan")},
-            {"learning_rate": float("inf")},
-            {"warmup_steps": 1.5},
-            {"group_size": True},
-            {"local_files_only": "true"},
-        ):
-            with self.subTest(change=change), self.assertRaises(ValueError):
-                validate_config(self.config(**change))
-        offline = configuration(
-            ROOT / "configs/credit_smoke.json",
-            ["local_files_only=true", "model=/data/models/qwen"],
-        )
-        self.assertTrue(offline["local_files_only"])
-        self.assertEqual(offline["model"], "/data/models/qwen")
 
 
+@unittest.skipUnless(importlib.util.find_spec("torch"), "CPU PyTorch not installed")
 class OptionalTorchTests(unittest.TestCase):
-    @unittest.skipUnless(
-        importlib.util.find_spec("torch"),
-        "torch not installed; no GPU required for this unit test",
-    )
-    def test_advantage_direction_clipping_and_reference_kl(self):
+    def test_advantage_direction_and_shared_colight_actions(self):
         import torch
+        from tsc_experiments.colight import CoLight
         from tsc_experiments.trainer import clipped_objective
 
         x = torch.tensor([-0.7, -0.9], requires_grad=True)
         old = x.detach().clone()
         loss, kl, _ = clipped_objective(x, old, old, 1.0, 0.2, 0.02)
         loss.backward()
-        self.assertTrue(
-            torch.all(x.grad < 0)
-        )  # Positive A raises log probability under gradient descent.
+        self.assertTrue(torch.all(x.grad < 0))
         self.assertEqual(float(kl), 0)
-        x = torch.tensor([0.0], requires_grad=True)
-        loss, _, _ = clipped_objective(x, torch.tensor([-1.0]), x.detach(), 1.0, 0.2, 0)
-        loss.backward()
-        self.assertEqual(
-            float(x.grad), 0
-        )  # Positive advantage ratio above clip has no surrogate gradient.
+        model = CoLight()
+        values = model(torch.ones(12, 25), torch.full((12, 4), -1.0))
+        self.assertEqual(values.shape, (12, 4))
+        self.assertTrue(torch.isfinite(values).all())
 
 
 if __name__ == "__main__":

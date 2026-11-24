@@ -116,6 +116,10 @@ def report(root, output):
             raise ValueError(
                 f"Mixed or missing traffic protocol for {dataset}; report separately"
             )
+    paired = {
+        (r["dataset"], r["method"], r["train_seed"], r["seed"]): r
+        for r in results if r.get("train_seed") is not None
+    }
     summaries = []
     for (dataset, method), group in sorted(grouped.items()):
         # Aggregate environment seeds within each independently trained policy first.
@@ -143,6 +147,7 @@ def report(root, output):
             "ATT",
             "AWT",
             "AQL",
+            "remaining_vehicles_including_waiting",
             "invalid_response_rate",
             "generated_tokens",
             "wall_seconds",
@@ -156,6 +161,23 @@ def report(root, output):
             summary[metric + "_sd"] = (
                 statistics.stdev(values) if len(values) > 1 else None
             )
+        for reference in ("trajectory", "full"):
+            deltas, aql_changes = defaultdict(list), defaultdict(list)
+            for row in group:
+                seed = row.get("train_seed")
+                match = paired.get((dataset, reference, seed, row["seed"]))
+                if match is not None:
+                    deltas[seed].append(row["ATT"] - match["ATT"])
+                    if match["AQL"]:
+                        aql_changes[seed].append(100 * (row["AQL"] / match["AQL"] - 1))
+            values = [statistics.mean(v) for v in deltas.values()]
+            summary[f"ATT_delta_vs_{reference}"] = statistics.mean(values) if values else None
+            summary[f"ATT_delta_sd_vs_{reference}"] = statistics.stdev(values) if len(values) > 1 else None
+            summary[f"paired_seeds_vs_{reference}"] = len(values)
+            summary[f"AQL_pct_vs_{reference}"] = (
+                statistics.mean(statistics.mean(v) for v in aql_changes.values())
+                if aql_changes else None
+            )
         summaries.append(summary)
     write_json(output / "summary.json", summaries)
     for name, rows in (("runs.csv", results), ("summary.csv", summaries)):
@@ -165,32 +187,6 @@ def report(root, output):
             writer.writeheader()
             writer.writerows(rows)
     plt = plotting()
-    credit_paths = [
-        p for p in root.rglob("credit_quality.json") if not read_json(p).get("scripted")
-    ]
-    if credit_paths:
-        fig, axes = plt.subplots(1, 3, figsize=(13, 4))
-        for path in credit_paths:
-            record = read_json(path)
-            if record.get("scripted"):
-                continue
-            methods = list(record["summary"])
-            for ax, key in zip(
-                axes,
-                ("pair_difference_mse", "pair_difference_variance", "sign_agreement"),
-            ):
-                values = [record["summary"][m][key] for m in methods]
-                ax.plot(
-                    methods,
-                    [float("nan") if v is None else v for v in values],
-                    marker="o",
-                    label=path.parent.name,
-                )
-                ax.set_ylabel(key)
-        fig.tight_layout()
-        fig.savefig(output / "credit-quality.png", dpi=180)
-        fig.savefig(output / "credit-quality.pdf")
-        plt.close(fig)
     for dataset in sorted({r["dataset"] for r in summaries}):
         data = [r for r in summaries if r["dataset"] == dataset]
         fig, axes = plt.subplots(1, 3, figsize=(max(12, len(data) * 1.6), 4.8))
@@ -240,123 +236,85 @@ def report(root, output):
         fig.savefig(output / f"{dataset}-queue-wait-curves.png", dpi=180)
         fig.savefig(output / f"{dataset}-queue-wait-curves.pdf")
         plt.close(fig)
-    # Per-policy training curves, no interpolation across unmatched training seeds.
-    logs = [
-        (p, jsonlines(p))
-        for p in sorted(root.rglob("training.jsonl"))
-        if not (p.parent / "manifest.json").exists()
-        or read_json(p.parent / "manifest.json").get("kind")
-        != "scripted plumbing check"
-    ]
+    logs = []
+    for p in sorted(root.rglob("training.jsonl")):
+        manifest_path = p.parent / "manifest.json"
+        if manifest_path.exists() and read_json(manifest_path).get("kind") == "scripted plumbing check":
+            continue
+        rows = jsonlines(p)
+        if rows:
+            logs.append((p, rows))
     if logs:
-        fields = [
-            "validation_ATT",
-            "validation_AWT",
-            "validation_AQL",
-            "zero_adv_group_fraction",
-            "kl",
-            "loss",
-        ]
-        fig, axes = plt.subplots(2, 3, figsize=(15, 8))
-        for ax, field in zip(axes.flat, fields):
-            for path, rows in logs:
-                rows = [r for r in rows if field in r]
-                if rows:
-                    ax.plot(
-                        [r["sim_seconds"] for r in rows],
-                        [r[field] for r in rows],
-                        label=path.parent.name,
-                    )
-            ax.set(xlabel="Training simulation seconds (including forks)", ylabel=field)
-        handles, labels = axes.flat[0].get_legend_handles_labels()
-        if not handles:
-            handles, labels = axes.flat[3].get_legend_handles_labels()
-        if handles:
-            fig.legend(
-                handles,
-                labels,
-                loc="lower center",
-                ncol=min(4, len(labels)),
-                fontsize=7,
-            )
-        fig.tight_layout(rect=(0, 0.08, 1, 1))
-        fig.savefig(output / "learning-curves.png", dpi=180)
-        fig.savefig(output / "learning-curves.pdf")
-        plt.close(fig)
-        signal_fields = [
-            "traffic_signal_group_fraction",
-            "mean_unique_phases",
-            "invalid_response_fraction",
-            "truncated_fraction",
-        ]
-        if any(
-            any(field in row for field in signal_fields)
-            for _, rows in logs
-            for row in rows
+        for fields, filename in (
+            ([("sim_seconds", "validation_ATT"), ("wall_seconds", "validation_ATT")], "learning-curves"),
+            ([("round", name) for name in (
+                "invalid_response_fraction", "cf_uniform_mean", "cf_loo_mean",
+                "cluster_sharpness", "cluster_fallback_rate", "cf_clip_fraction",
+            )], "training-signal"),
         ):
-            fig, axes = plt.subplots(2, 2, figsize=(12, 7))
-            for ax, field in zip(axes.flat, signal_fields):
+            columns = 2 if len(fields) == 2 else 3
+            fig, axes = plt.subplots(len(fields) // columns, columns, figsize=(5 * columns, 4 * (len(fields) // columns)))
+            for ax, (x, y) in zip(axes.flat, fields):
                 for path, rows in logs:
-                    series = [r for r in rows if field in r]
+                    series = [r for r in rows if x in r and y in r and r.get("selected_within_budget", True)]
+                    if y == "validation_ATT":
+                        # Includes the final time-matched checkpoint even when it falls between logging rounds.
+                        series = [read_json(p) for p in sorted((path.parent / "validation").glob("*/metrics.json"))]
+                        series = [r for r in series if "training_wall_seconds" in r]
+                        if series:
+                            series = [{**r, "validation_ATT": r["ATT"],
+                                       "wall_seconds": r["training_wall_seconds"]} for r in series]
+                        else:
+                            series = [r for r in rows if x in r and y in r and r.get("selected_within_budget", True)]
                     if series:
-                        ax.plot(
-                            [r["sim_seconds"] for r in series],
-                            [r[field] for r in series],
-                            label=path.parent.name,
-                        )
-                ax.set(
-                    xlabel="Training simulation seconds (including forks)", ylabel=field
-                )
-            handles, labels = axes.flat[0].get_legend_handles_labels()
-            if handles:
-                fig.legend(
-                    handles,
-                    labels,
-                    loc="lower center",
-                    ncol=min(4, len(labels)),
-                    fontsize=7,
-                )
-            fig.tight_layout(rect=(0, 0.08, 1, 1))
-            fig.savefig(output / "training-signal.png", dpi=180)
-            fig.savefig(output / "training-signal.pdf")
-            plt.close(fig)
-        budget_rows = []
-        for path, rows in logs:
-            if not rows:
-                continue
-            config_path = path.parent / "config.json"
-            c = read_json(config_path) if config_path.exists() else {}
-            budget_rows.append(
-                {
-                    "run": str(path.parent),
-                    "method": c.get("method"),
-                    "seed": c.get("seed"),
-                    "sim_seconds": rows[-1]["sim_seconds"],
-                    "rounds": len(rows),
-                    "optimizer_steps": rows[-1].get("optimizer_steps", 0),
-                    "training_generated_tokens": sum(
-                        r["training_generated_tokens"] for r in rows
-                    ),
-                    "training_llm_calls": sum(r["training_llm_calls"] for r in rows),
-                    "wall_seconds_including_validation": rows[-1]["wall_seconds"],
-                }
+                        ax.plot([r[x] for r in series], [r[y] for r in series], label=path.parent.name)
+                ax.set(xlabel=x, ylabel=y)
+            handles, labels = next(
+                (ax.get_legend_handles_labels() for ax in axes.flat if ax.lines), ([], [])
             )
-        write_json(output / "training-costs.json", budget_rows)
+            if handles:
+                fig.legend(handles, labels, loc="lower center", ncol=min(4, len(labels)), fontsize=7)
+            fig.tight_layout(rect=(0, 0.12, 1, 1))
+            for ext in ("png", "pdf"):
+                fig.savefig(output / f"{filename}.{ext}", dpi=180)
+            plt.close(fig)
+        costs = []
+        for path, rows in logs:
+            config_path, summary_path = path.parent / "config.json", path.parent / "summary.json"
+            c = read_json(config_path) if config_path.exists() else {}
+            summary = read_json(summary_path) if summary_path.exists() else {}
+            costs.append({
+                "run": str(path.parent), "method": c.get("method"), "seed": c.get("seed"),
+                "sim_seconds": rows[-1]["sim_seconds"], "rounds": summary.get("rounds", len(rows)),
+                "optimizer_steps": next((r["optimizer_steps"] for r in reversed(rows)
+                    if r.get("selected_within_budget", True) and "optimizer_steps" in r), 0),
+                "training_wall_seconds": rows[-1]["wall_seconds"],
+                "selected_wall_seconds": summary.get("selected_wall_seconds"),
+                "total_wall_seconds": summary.get("total_wall_seconds"),
+                "target_wall_seconds": summary.get("target_wall_seconds"),
+                **{key: sum(r.get(key, 0) for r in rows) for key in (
+                    "training_generated_tokens", "training_llm_calls", "generation_wall_seconds",
+                    "update_wall_seconds", "simulation_and_scoring_wall_seconds",
+                    "branch_sim_seconds", "replay_sim_seconds", "branch_worker_cpu_seconds",
+                )},
+            })
+        write_json(output / "training-costs.json", costs)
     markdown = [
         "# Experimental results",
         "",
         "Error bars are sample SD, not confidence intervals.",
         "Trained models: average evaluation seeds within each training seed first.",
         "",
-        "| Dataset | Method | Units | ATT | AWT | AQL |",
-        "|---|---|---:|---:|---:|---:|",
+        "| Dataset | Method | Units | ATT | AWT | AQL | Remaining | Delta ATT vs Trajectory |",
+        "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     for r in summaries:
-        cells = [
-            f"{r[m + '_mean']:.2f}"
-            + (f" ± {r[m + '_sd']:.2f}" if r[m + "_sd"] is not None else " (n=1)")
-            for m in ("ATT", "AWT", "AQL")
-        ]
+        cells = []
+        for m in ("ATT", "AWT", "AQL", "remaining_vehicles_including_waiting"):
+            mean, sd = r[m + "_mean"], r[m + "_sd"]
+            cells.append("—" if mean is None else f"{mean:.2f}" + (f" ± {sd:.2f}" if sd is not None else ""))
+        delta = r["ATT_delta_vs_trajectory"]
+        cells.append("—" if delta is None else f"{delta:+.2f}")
         markdown.append(
             f"| {r['dataset']} | {r['method']} | {r['independent_units']} | "
             + " | ".join(cells)

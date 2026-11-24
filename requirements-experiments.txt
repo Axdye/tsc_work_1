@@ -1,5 +1,5 @@
 # Target API versions; GPU training has not been executed in the author's CPU workspace.
-# Reuses the Qwen3.5 text-only loader from minimal_cityflow_grpo.py; no TRL required here.
+# The experiment runner loads the Qwen3.5 text backbone directly.
 torch>=2.6,<3
 transformers==5.2.0
 peft==0.18.1
