@@ -9,7 +9,6 @@ from __future__ import annotations
 import contextlib
 import copy
 import io
-import json
 import math
 import os
 from pathlib import Path
@@ -17,7 +16,10 @@ import shutil
 import sys
 import types
 
-from .common import ROOT, PHASES, SYSTEM, read_json, write_json, sha
+from .common import (
+    DIRECTIONS, DIRECTION_NAMES, PHASES, PHASE_APPROACHES, ROOT, SYSTEM,
+    read_json, sha, write_json,
+)
 
 DATASETS = {
     "synthetic8000": ("CoLLMLight", "Synthetic", "4_4", "anon_4_4_synthetic_8000.json"),
@@ -42,10 +44,55 @@ DATASETS = {
 
 
 def prompt(observation):
+    phase = observation["current_phase"]
+    lines = [
+        f"路口 {observation['intersection']}，时刻 {observation['time_seconds']} 秒。",
+        f"当前相位 {phase if phase in PHASES else '清空'}，已持续 {observation['phase_age_seconds']} 秒。",
+        f"控制间隔 {observation['decision_interval_seconds']} 秒，切相时清空 {observation['clearance_seconds']} 秒。",
+        "进口方位指车辆从哪一侧驶入。近/中/远是按距停止线将车道分为三等段后的行驶车辆数。",
+        "下游按实际接收车道统计。路网出口表示无受控接收车道。停车时间为当前连续停车时长。",
+        "相位｜进口｜排队｜近/中/远来车｜平均/最长停车秒数｜下游排队、平均/最高占用",
+    ]
+    for label, directions in zip(PHASES, PHASE_APPROACHES):
+        approaches = observation["phase_observations"][label]["approaches"]
+        for direction, approach in zip(directions, approaches):
+            near, mid, far = approach["approaching"]
+            mean_wait, max_wait = approach["wait_seconds"]
+            downstream = approach["downstream"]
+            receiving = "路网出口"
+            if downstream is not None:
+                queued, occupancy, peak = downstream
+                receiving = f"{queued}辆、{occupancy:.0%}/{peak:.0%}"
+            lines.append(
+                f"{label}｜{DIRECTION_NAMES[direction]}｜{approach['queued']}｜"
+                f"{near}/{mid}/{far}｜{mean_wait:.0f}/{max_wait:.0f}｜{receiving}"
+            )
+    neighbors = []
+    for direction, neighbor in zip(DIRECTIONS, observation["neighbors_ENWS"]):
+        name = DIRECTION_NAMES[direction]
+        if neighbor is None:
+            neighbors.append(f"{name}侧：路网边界")
+        else:
+            current = neighbor["current_phase"]
+            neighbors.append(
+                f"{name}侧：{neighbor['intersection']}，"
+                f"相位 {current if current in PHASES else '清空'}，"
+                f"总排队 {neighbor['queued']} 辆"
+            )
+    lines.append("一跳邻居当前观测（各路口随后各自选相位）")
+    lines.extend(neighbors)
     return [
         {"role": "system", "content": SYSTEM},
-        {"role": "user", "content": json.dumps(observation, ensure_ascii=False)},
+        {"role": "user", "content": "\n".join(lines)},
     ]
+
+
+def inbound_direction(road):
+    start, end = road["points"][0], road["points"][-1]
+    dx, dy = end["x"] - start["x"], end["y"] - start["y"]
+    if abs(dx) > abs(dy):
+        return "W" if dx > 0 else "E"
+    return "S" if dy > 0 else "N"
 
 
 def cluster_features(observation):
@@ -89,15 +136,15 @@ class TrafficEnvironment:
             raise ValueError("Invalid interval/clearance/horizon")
         self.np = np
         self.dataset, self.seed = dataset, int(seed)
-        self.interval, self.horizon = interval, horizon
+        self.interval, self.clearance, self.horizon = interval, clearance, horizon
         self.workdir = Path(workdir).resolve()
         self.workdir.mkdir(parents=True, exist_ok=True)
-        road, flow, grid = dataset_paths(dataset)
-        for path in (road, flow):
+        road_path, flow_path, grid = dataset_paths(dataset)
+        for path in (road_path, flow_path):
             if not path.is_file():
                 raise FileNotFoundError(f"Missing vendored benchmark: {path}")
             shutil.copy2(path, self.workdir / path.name)
-        self.roadnet = read_json(road)
+        self.roadnet = read_json(road_path)
         rows, cols = map(int, grid.split("_"))
         conf = literal_config("dic_traffic_env_conf")
         conf.update(
@@ -110,8 +157,8 @@ class TrafficEnvironment:
             MIN_ACTION_TIME=interval,
             YELLOW_TIME=clearance,
             ALL_RED_TIME=0,
-            TRAFFIC_FILE=flow.name,
-            ROADNET_FILE=road.name,
+            TRAFFIC_FILE=flow_path.name,
+            ROADNET_FILE=road_path.name,
             LIST_STATE_FEATURE=[
                 "cur_phase",
                 "time_this_phase",
@@ -138,7 +185,7 @@ class TrafficEnvironment:
             )
             self.env.reset()
         self.names = [i.inter_name for i in self.env.list_intersection]
-        self.movements = {
+        movements = {
             i["id"]: phase_movements(i)
             for i in self.roadnet["intersections"]
             if not i["virtual"]
@@ -149,29 +196,42 @@ class TrafficEnvironment:
                   self.env.traffic_light_node_dict[name]["neighbor_ENWS"])
             for name in self.names
         ]
-        roads = {}
         controlled = set(self.names)
-        for road_config in self.roadnet["roads"]:
-            points = road_config["points"]
-            length = sum(math.hypot(a["x"] - b["x"], a["y"] - b["y"])
-                         for a, b in zip(points, points[1:]))
-            if road_config["endIntersection"] in controlled:
-                roads[road_config["id"]] = max(1, int(length / 7.5))
-        self.phase_lanes = [
-            [
-                (
-                    sorted({lane for lane, _ in pairs}),
-                    sorted({lane for _, targets in pairs for lane in targets}),
-                )
-                for pairs in (self.movements[name][phase] for phase in range(1, 5))
-            ]
-            for name in self.names
-        ]
-        self.receiving_capacity = {
-            lane: roads[lane.rsplit("_", 1)[0]]
-            for states in self.phase_lanes for _, outgoing in states for lane in outgoing
-            if lane.rsplit("_", 1)[0] in roads
-        }
+        road_lengths, road_directions = {}, {}
+        controlled_receivers = set()
+        for road in self.roadnet["roads"]:
+            points = road["points"]
+            road_lengths[road["id"]] = sum(
+                math.hypot(a["x"] - b["x"], a["y"] - b["y"])
+                for a, b in zip(points, points[1:])
+            )
+            road_directions[road["id"]] = inbound_direction(road)
+            if road["endIntersection"] in controlled:
+                controlled_receivers.add(road["id"])
+        self.phase_lanes = []
+        self.inlet_lengths = {}
+        self.receiving_capacity = {}
+        for name in self.names:
+            phases = []
+            for phase, directions in enumerate(PHASE_APPROACHES, 1):
+                approaches = []
+                for direction in directions:
+                    incoming, outgoing = set(), set()
+                    for inlet, receivers in movements[name][phase]:
+                        road_id = inlet.rsplit("_", 1)[0]
+                        if road_directions[road_id] == direction:
+                            incoming.add(inlet)
+                            outgoing.update(receivers)
+                            self.inlet_lengths[inlet] = road_lengths[road_id]
+                    receiving = []
+                    for lane in sorted(outgoing):
+                        road_id = lane.rsplit("_", 1)[0]
+                        if road_id in controlled_receivers:
+                            receiving.append(lane)
+                            self.receiving_capacity[lane] = max(1, int(road_lengths[road_id] / 7.5))
+                    approaches.append((sorted(incoming), receiving))
+                phases.append(approaches)
+            self.phase_lanes.append(phases)
         self.agents = {
             kind: [
                 cls(
@@ -194,8 +254,8 @@ class TrafficEnvironment:
             "dataset": dataset,
             "numpy_seed": seed,
             "engine_seed": read_json(self.workdir / "cityflow.config")["seed"],
-            "roadnet_sha256": sha(road),
-            "flow_sha256": sha(flow),
+            "roadnet_sha256": sha(road_path),
+            "flow_sha256": sha(flow_path),
             "engine_file": cityflow.__file__,
             "engine_sha256": sha(cityflow.__file__),
             "upstream_env_sha256": sha(ROOT / "vendor/LLMTSCS/utils/cityflow_env.py"),
@@ -230,13 +290,7 @@ class TrafficEnvironment:
                     link = node["roadLinks"][index]
                     if link["type"] == "turn_right":
                         continue
-                    p = roads[link["startRoad"]]["points"]
-                    dx, dy = p[-1]["x"] - p[0]["x"], p[-1]["y"] - p[0]["y"]
-                    origin = (
-                        ("W" if dx > 0 else "E")
-                        if abs(dx) > abs(dy)
-                        else ("S" if dy > 0 else "N")
-                    )
+                    origin = inbound_direction(roads[link["startRoad"]])
                     actual.add((origin, link["type"]))
                 if actual != want:
                     raise ValueError(
@@ -318,34 +372,86 @@ class TrafficEnvironment:
         ]
 
     def observations(self):
-        queued = self.env.eng.get_lane_waiting_vehicle_count()
-        counts = self.env.eng.get_lane_vehicle_count()
-        neighbor_queues = self.queues()
+        current = self.env.system_states
+        lane_vehicles = current["get_lane_vehicles"]
+        speeds = current["get_vehicle_speed"]
+        distances = current["get_vehicle_distance"]
+        waiting = self.env.waiting_vehicle_list
+        # The running-vehicle map excludes CityFlow's lane-change shadows.
+        vehicles = {
+            lane: [v for v in lane_vehicles[lane] if v in speeds]
+            for lane in self.inlet_lengths.keys() | self.receiving_capacity.keys()
+        }
+        stopped = {
+            lane: [v for v in ids if speeds[v] < 0.1] for lane, ids in vehicles.items()
+        }
+        arrivals = {}
+        for lane, length in self.inlet_lengths.items():
+            segments = [0, 0, 0]
+            for vehicle in vehicles[lane]:
+                if speeds[vehicle] >= 0.1:
+                    remaining = max(0.0, length - distances[vehicle])
+                    segment = min(2, int(3 * remaining / max(1.0, length)))
+                    segments[segment] += 1
+            arrivals[lane] = segments
+
+        def downstream(lanes):
+            if not lanes:
+                return None
+            capacity = [self.receiving_capacity[lane] for lane in lanes]
+            counts = [len(vehicles[lane]) for lane in lanes]
+            return (
+                sum(len(stopped[lane]) for lane in lanes),
+                min(1.0, sum(counts) / sum(capacity)),
+                min(1.0, max(n / c for n, c in zip(counts, capacity))),
+            )
+
+        def approach(incoming, outgoing):
+            q = sum(len(stopped[lane]) for lane in incoming)
+            waits = [
+                waiting[v]["time"] if v in waiting and waiting[v]["link"] == lane else 0
+                for lane in incoming for v in stopped[lane]
+            ]
+            return {
+                "queued": q,
+                "approaching": tuple(sum(arrivals[lane][j] for lane in incoming) for j in range(3)),
+                "wait_seconds": (sum(waits) / q, max(waits)) if q else (0, 0),
+                "downstream": downstream(outgoing),
+            }
+
+        nodes = self.env.list_intersection
+        neighborhood = [
+            {
+                "intersection": name,
+                "current_phase": PHASES[node.current_phase_index - 1]
+                if node.current_phase_index in range(1, 5) else "clearance",
+                "queued": queue,
+            }
+            for name, node, queue in zip(self.names, nodes, self.queues())
+        ]
         observations = []
-        for index, node in enumerate(self.env.list_intersection):
+        for index, node in enumerate(nodes):
             features = {}
-            for label, (incoming, outgoing) in zip(PHASES, self.phase_lanes[index]):
-                receiving = [lane for lane in outgoing if lane in self.receiving_capacity]
-                capacity = sum(self.receiving_capacity[lane] for lane in receiving)
+            for label, lanes in zip(PHASES, self.phase_lanes[index]):
+                approaches = [approach(incoming, outgoing) for incoming, outgoing in lanes]
+                receivers = sorted({lane for _, outgoing in lanes for lane in outgoing})
+                occupancy = downstream(receivers)
                 features[label] = {
-                    "incoming_queued": sum(queued.get(lane, 0) for lane in incoming),
-                    "incoming_running": sum(
-                        max(0, counts.get(lane, 0) - queued.get(lane, 0)) for lane in incoming
-                    ),
-                    "receiving_queued": sum(queued.get(lane, 0) for lane in outgoing),
-                    "receiving_vehicles": sum(counts.get(lane, 0) for lane in outgoing),
-                    "receiving_occupancy": min(1.0, sum(counts.get(lane, 0) for lane in receiving)
-                                               / capacity) if capacity else 0.0,
+                    "approaches": approaches,
+                    "incoming_queued": sum(a["queued"] for a in approaches),
+                    "incoming_running": sum(sum(a["approaching"]) for a in approaches),
+                    "receiving_occupancy": occupancy[1] if occupancy is not None else 0.0,
                 }
-            phase = node.current_phase_index
             observations.append({
                 "intersection": self.names[index],
                 "time_seconds": self.time,
-                "current_phase": PHASES[phase - 1] if phase in range(1, 5) else "clearance",
+                "current_phase": neighborhood[index]["current_phase"],
+                "phase_age_seconds": max(0, node.current_phase_duration),
                 "decision_interval_seconds": self.interval,
+                "clearance_seconds": self.clearance,
                 "phase_observations": features,
-                "neighbor_total_queues_ENWS": [
-                    neighbor_queues[n] if n is not None else None for n in self.neighbors[index]
+                "neighbors_ENWS": [
+                    neighborhood[n] if n is not None else None for n in self.neighbors[index]
                 ],
             })
         return observations

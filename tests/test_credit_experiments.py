@@ -32,12 +32,25 @@ class FakeEnv:
 
     def observations(self):
         return [{
+            "intersection": name,
             "current_phase": PHASES[phase],
+            "time_seconds": self.time,
+            "phase_age_seconds": 0,
+            "decision_interval_seconds": self.interval,
+            "clearance_seconds": 0,
+            "neighbors_ENWS": [None] * 4,
             "phase_observations": {
-                label: {"incoming_queued": 1, "incoming_running": 0, "receiving_occupancy": 0}
+                label: {
+                    "incoming_queued": 2,
+                    "incoming_running": 0,
+                    "receiving_occupancy": 0,
+                    "approaches": [
+                        {"queued": 1, "approaching": (0, 0, 0), "wait_seconds": (0, 0), "downstream": None}
+                    ] * 2,
+                }
                 for label in PHASES
             }
-        } for phase in self.phases]
+        } for name, phase in zip(self.names, self.phases)]
 
     def snapshot(self):
         return self.time, self.phases[:]
@@ -130,7 +143,8 @@ class CreditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as path:
             plan = make_plan(ROOT / "configs/credit_suite.json", path)
             trains = {j["id"]: j for j in plan["jobs"] if j["kind"] == "train"}
-            self.assertEqual(len(trains), 27)
+            self.assertEqual(len(trains), 9)
+            self.assertEqual(len(plan["jobs"]), 81)
             self.assertFalse(trains["train-colight-s0"]["gpu"])
             self.assertEqual(trains["train-trajectory-wall-s0"]["depends"], ["train-full-s0"])
 
@@ -144,7 +158,7 @@ class CreditTests(unittest.TestCase):
 class OptionalTorchTests(unittest.TestCase):
     def test_advantage_direction_and_shared_colight_actions(self):
         import torch
-        from tsc_experiments.colight import CoLight
+        from tsc_experiments.colight import CoLight, LOCAL_FEATURES, NEIGHBOR_FEATURES, state
         from tsc_experiments.trainer import clipped_objective
 
         x = torch.tensor([-0.7, -0.9], requires_grad=True)
@@ -154,8 +168,11 @@ class OptionalTorchTests(unittest.TestCase):
         self.assertTrue(torch.all(x.grad < 0))
         self.assertEqual(float(kl), 0)
         model = CoLight()
-        values = model(torch.ones(12, 25), torch.full((12, 4), -1.0))
-        self.assertEqual(values.shape, (12, 4))
+        local, neighbors = state(FakeEnv())
+        self.assertEqual(local.shape, (2, LOCAL_FEATURES))
+        self.assertEqual(neighbors.shape, (2, 4, NEIGHBOR_FEATURES))
+        values = model(local, neighbors)
+        self.assertEqual(values.shape, (2, 4))
         self.assertTrue(torch.isfinite(values).all())
 
 

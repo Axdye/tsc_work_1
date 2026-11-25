@@ -15,6 +15,10 @@ export TSC_MODEL=/data/models/Qwen3.5-0.8B
 
 离线安装时使用目标 Python ABI、Linux 架构和 CUDA 版本对应的 wheelhouse，安装命令为 `python -m pip install --no-index --find-links /path/to/wheelhouse -r requirements-experiments.txt`。先准备与驱动兼容的 PyTorch，再编译 CityFlow。编译产物必须与训练环境使用同一个 Python。可设置 `HF_HUB_OFFLINE=1` 和 `TRANSFORMERS_OFFLINE=1`。Qwen3.5 的文本模型加载、token 保留和 LoRA 更新共用同一入口。
 
+## 中文策略观测
+
+策略读取当前相位、相位持续时间和切相清空成本。四个候选相位逐方向列出进口排队、近中远三段行驶车辆、平均和最长连续停车时间，以及实际接收车道的排队、容量加权和最高占用率。另提供一跳邻居的当前相位及总排队，路网边界显式标出。三段位置由当前车辆距离估算，接收容量按 7.5 米有效车间距近似。回复采用一句简短中文理由和唯一的 `<signal>NTST</signal>` 相位标签。LLM 方法共用此模板，CoLight 从同一观测构造张量。经验 COMA 聚类仍使用相位级的 16 维特征。[Traffic-R1 附录 A.1](https://aclanthology.org/2026.acl-long.995.pdf) · [LLMLight](https://arxiv.org/abs/2312.16044v5) · [CoLLMLight](https://openreview.net/forum?id=KeJqoEVOeY)
+
 ## 冒烟与预实验
 
 CityFlow 和 NumPy 可用后，先用脚本策略检查 CPU 采集、分支与预算。该模式没有模型前向和梯度。
@@ -45,11 +49,11 @@ python scripts/tsc_experiment.py suite --model "$TSC_MODEL" \
   --output outputs/work2-main --execute --gpus 0 1 2 3 4 5 6 7
 ```
 
-第一条命令只生成 `plan.json` 与实验配置。正式套件运行 21 个等回复预算的 LLM 作业和 3 个 CPU CoLight 风格 DQN 作业，然后为每个训练种子额外运行一个等墙钟的 Trajectory-GRPO 对照。每个 LLM 作业独占一张 GPU。正式配置为 `K=4, T=12, H=4, gamma=0.95`，40 个完整窗口共 30,720 条训练回复。训练和分支截止于 2700 秒，末 900 秒供合成留出验证。测试在济南 1、济南 3 和杭州 1 上运行完整 3600 秒。
+第一条命令只生成 `plan.json` 与实验配置。正式套件固定使用训练种子 0，共 7 个等回复预算的 LLM 作业、1 个 CPU CoLight 风格 DQN 作业和 1 个等墙钟 Trajectory-GRPO 作业。每个留出场景仍用环境种子 0、1 评测。每个 LLM 作业独占一张 GPU。正式配置为 `K=4, T=12, H=4, gamma=0.95`，40 个完整窗口共 30,720 条训练回复。训练和分支截止于 2700 秒，末 900 秒供合成留出验证。测试在济南 1、济南 3 和杭州 1 上运行完整 3600 秒。
 
-CoLight 基线使用与 LLM 相同的相位、车道和方向对齐邻居队列信息，以共享图注意力 Double DQN 在同一训练时段学习。它按与 LLM 主轨迹相同的 1,920 次环境控制步训练，模型跨路网共享且无需改变输出维数。该实现是协议对齐的 CoLight 风格对照。固定相序与 MaxPressure 使用仓库已有的上游适配器。
+CoLight 基线使用与 LLM 相同的结构化相位、车道和方向对齐邻居观测，以共享图注意力 Double DQN 在同一训练时段学习。它按与 LLM 主轨迹相同的 1,920 次环境控制步训练，模型跨路网共享且无需改变输出维数。该实现是协议对齐的 CoLight 风格对照。固定相序与 MaxPressure 使用仓库已有的上游适配器。
 
-每个训练种子的完整方法为等墙钟基线提供时间上限。时间包含校准、模拟、收集和参数更新，单独记录含验证的端到端时间。同一时钟协议下，等墙钟作业使用在上限内完成的最后一个更新。若某个完整窗口超时，回退该窗口的模型参数并记录超出的实际时间。比较时尽量使用同型 GPU 和相同 CPU 配额。跨卡共享 CPU 资源不足时，等墙钟实验可用 `--gpus 0` 串行运行。
+完整方法为等墙钟基线提供时间上限。时间包含校准、模拟、收集和参数更新，单独记录含验证的端到端时间。同一时钟协议下，等墙钟作业使用在上限内完成的最后一个更新。若某个完整窗口超时，回退该窗口的模型参数并记录超出的实际时间。比较时尽量使用同型 GPU 和相同 CPU 配额。跨卡共享 CPU 资源不足时，等墙钟实验可用 `--gpus 0` 串行运行。
 
 默认多进程分支在各自 CityFlow 引擎中用原生内存快照复用实际联合分支。上游原生 Archive 含有引擎对象引用，工作进程用真实联合动作同步至采集快照，再在本引擎内恢复分支。工作进程缓存已经同步的前缀，日志分别报告标准分支仿真量与同步、复跑开销。每个切片的实际首步奖励会被交叉校验。使用 `branch_workers=1` 时直接在采集引擎内评分，省去跨进程同步。
 

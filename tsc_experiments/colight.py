@@ -10,40 +10,61 @@ import torch
 from torch import nn
 
 from .branches import step_reward
-from .common import PHASES, append_json, write_json
-from .environment import cluster_features
+from .common import DIRECTIONS, PHASES, PHASE_APPROACHES, append_json, write_json
+
+
+LOCAL_FEATURES = len(PHASES) + 4 + 10 * sum(map(len, PHASE_APPROACHES))
+NEIGHBOR_FEATURES = 1 + len(PHASES)
+
+
+def phase_flags(phase):
+    return [float(phase == p) for p in PHASES]
+
+
+def movement_features(approach):
+    downstream = approach["downstream"]
+    queue, occupancy, peak = downstream if downstream is not None else (0, 0, 0)
+    counts = [approach["queued"], *approach["approaching"], *approach["wait_seconds"], queue]
+    return [*map(math.log1p, counts), occupancy, peak, float(downstream is not None)]
 
 
 def state(env):
     local, neighbors = [], []
     for o in env.observations():
-        features = cluster_features(o)
-        features[:8] = [math.log1p(v) for v in features[:8]]
-        features += [
-            math.log1p(o["phase_observations"][phase][key])
-            for key in ("receiving_queued", "receiving_vehicles")
-            for phase in PHASES
-        ]
-        local.append(features + [o["time_seconds"] / 3600])
-        neighbors.append([-1 if n is None else math.log1p(n)
-                          for n in o["neighbor_total_queues_ENWS"]])
+        features = phase_flags(o["current_phase"])
+        features.extend([
+            o["time_seconds"] / 3600,
+            math.log1p(o["phase_age_seconds"]),
+            o["decision_interval_seconds"] / 60,
+            o["clearance_seconds"] / 60,
+        ])
+        for phase in PHASES:
+            for approach in o["phase_observations"][phase]["approaches"]:
+                features.extend(movement_features(approach))
+        local.append(features)
+        neighbors.append([
+            [math.log1p(n["queued"]), *phase_flags(n["current_phase"])]
+            if n is not None else [-1, *phase_flags(None)]
+            for n in o["neighbors_ENWS"]
+        ])
     return torch.tensor(local, dtype=torch.float32), torch.tensor(neighbors, dtype=torch.float32)
 
 
 class CoLight(nn.Module):
     def __init__(self):
         super().__init__()
-        self.local = nn.Sequential(nn.Linear(25, 64), nn.ReLU())
-        self.direction = nn.Parameter(torch.zeros(5, 64))
-        self.messages = nn.Linear(1, 64)
+        self.local = nn.Sequential(nn.Linear(LOCAL_FEATURES, 64), nn.ReLU())
+        self.direction = nn.Parameter(torch.zeros(1 + len(DIRECTIONS), 64))
+        self.messages = nn.Linear(NEIGHBOR_FEATURES, 64)
         self.attention = nn.MultiheadAttention(64, 4, batch_first=True)
         self.q = nn.Sequential(nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 4))
 
     def forward(self, local, neighbors):
         local = self.local(local)
-        # Inputs include four direction-specific queues and a self token.
-        messages = torch.cat((local.unsqueeze(1), self.messages(neighbors.clamp_min(0).unsqueeze(-1))), 1)
-        mask = torch.cat((torch.zeros_like(neighbors[:, :1], dtype=torch.bool), neighbors < 0), 1)
+        # One self token and one message per observed, direction-aligned neighbor.
+        messages = torch.cat((local.unsqueeze(1), self.messages(neighbors.clamp_min(0))), dim=1)
+        missing = neighbors[:, :, 0] < 0
+        mask = torch.cat((torch.zeros_like(missing[:, :1]), missing), dim=1)
         context, _ = self.attention(local.unsqueeze(1), messages + self.direction,
                                     messages + self.direction, key_padding_mask=mask,
                                     need_weights=False)

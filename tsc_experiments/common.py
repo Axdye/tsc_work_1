@@ -9,12 +9,17 @@ import statistics
 ROOT = Path(__file__).resolve().parents[1]
 PHASES = ("ETWT", "NTST", "ELWL", "NLSL")
 METHODS = ("counterfactual", "joint", "trajectory", "rtg", "colight")
+DIRECTIONS = ("E", "N", "W", "S")
+PHASE_APPROACHES = (("E", "W"), ("N", "S"), ("E", "W"), ("N", "S"))
+DIRECTION_NAMES = dict(zip(DIRECTIONS, ("东", "北", "西", "南")))
 SYSTEM = (
-    "You control one traffic intersection. Choose one phase: ETWT (east/west "
-    "through), NTST (north/south through), ELWL (east/west left), NLSL "
-    "(north/south left). Right turns follow the road network. Consider incoming "
-    "demand, downstream receiving traffic and neighboring demand. Give at most "
-    "one short sentence, then exactly one <signal>PHASE</signal> tag."
+    "你负责一个路口的信号控制，需要为下一个控制间隔选择一个相位。"
+    "ETWT放行东西进口直行，NTST放行南北进口直行，"
+    "ELWL放行东西进口左转，NLSL放行南北进口左转。"
+    "综合比较已排队车辆、近段来车和等待时间，优先选择接收车道有余量的相位，"
+    "避免下游回堵和长时间未获服务。比较切相损失与保持当前相位的收益。"
+    "用一句简短中文说明理由，另起一行按格式输出，例如 <signal>ETWT</signal>。"
+    "只输出一个相位标签。"
 )
 
 

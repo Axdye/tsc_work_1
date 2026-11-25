@@ -18,7 +18,8 @@ sys.path.insert(0, str(ROOT))
 )
 class EngineTests(unittest.TestCase):
     def test_engine_and_python_timers_restore_together(self):
-        from tsc_experiments.environment import TrafficEnvironment
+        from tsc_experiments.common import PHASES
+        from tsc_experiments.environment import TrafficEnvironment, cluster_features, prompt
 
         with tempfile.TemporaryDirectory() as path:
             env = TrafficEnvironment("jinan2", 0, Path(path) / "engine", horizon=300)
@@ -26,12 +27,35 @@ class EngineTests(unittest.TestCase):
                 env.step(env.rule_actions())
             snapshot = env.snapshot()
             before = env.measurement()
+            inputs = env.observations()
+            self.assertTrue(any(
+                sum(row["incoming_running"] for row in o["phase_observations"].values())
+                for o in inputs
+            ))
+            for index, o in enumerate(inputs):
+                self.assertEqual(len(cluster_features(o)), 16)
+                self.assertEqual(tuple(o["phase_observations"]), PHASES)
+                for phase, data in enumerate(o["phase_observations"].values()):
+                    self.assertEqual(len(data["approaches"]), 2)
+                    for a, (_, receiving) in zip(data["approaches"], env.phase_lanes[index][phase]):
+                        self.assertEqual(len(a["approaching"]), 3)
+                        self.assertLessEqual(a["wait_seconds"][0], a["wait_seconds"][1])
+                        self.assertEqual(a["downstream"] is None, not receiving)
+                        if receiving:
+                            self.assertLessEqual(0, a["downstream"][1])
+                            self.assertLessEqual(a["downstream"][1], a["downstream"][2])
+                            self.assertLessEqual(a["downstream"][2], 1)
+                messages = prompt(o)
+                self.assertIn("近/中/远来车", messages[1]["content"])
+                self.assertIn("ETWT｜东", messages[1]["content"])
+                self.assertIn("<signal>ETWT</signal>", messages[0]["content"])
             arrivals = env.arrivals()
             actions = [1] * len(env.names)
             first = env.step(actions)
             end_arrivals = env.arrivals()
             env.restore(snapshot)
             self.assertEqual(env.measurement(), before)
+            self.assertEqual(env.observations(), inputs)
             self.assertEqual(env.arrivals(), arrivals)
             repeated = env.step(actions)
             self.assertEqual(first, repeated)
